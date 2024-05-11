@@ -88,6 +88,20 @@ get_axis_position_across_moves(struct move *m, int axis, double time)
     return get_axis_position(m, axis, time);
 }
 
+static inline double
+get_velocity_across_moves(struct move *m, int axis, double time)
+{
+    while (likely(time < 0.)) {
+        m = list_prev_entry(m, node);
+        time += m->move_t;
+    }
+    while (likely(time > m->move_t)) {
+        time -= m->move_t;
+        m = list_next_entry(m, node);
+    }
+    return move_get_velocity(m, time) * m->axes_r.axis[axis - 'x'];
+}
+
 // Calculate the position from the convolution of the shaper with input signal
 static inline double
 calc_position(struct move *m, int axis, double move_time
@@ -102,6 +116,18 @@ calc_position(struct move *m, int axis, double move_time
     return res;
 }
 
+static inline double
+calc_velocity(struct move *m, int axis, double move_time
+              , struct shaper_pulses *sp)
+{
+    double res = 0.;
+    int num_pulses = sp->num_pulses, i;
+    for (i = 0; i < num_pulses; ++i) {
+        double t = sp->pulses[i].t, a = sp->pulses[i].a;
+        res += a * get_velocity_across_moves(m, axis, move_time + t);
+    }
+    return res;
+}
 
 /****************************************************************
  * Kinematics-related shaper code
@@ -125,7 +151,19 @@ shaper_x_calc_position(struct stepper_kinematics *sk, struct move *m
     if (!is->sx.num_pulses)
         return is->orig_sk->calc_position_cb(is->orig_sk, m, move_time);
     is->m.start_pos.x = calc_position(m, 'x', move_time, &is->sx);
+    is->m.start_v = 0.;
     return is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
+}
+
+static double
+shaper_x_calc_velocity(struct stepper_kinematics *sk, struct move *m
+                       , double move_time)
+{
+    struct input_shaper *is = container_of(sk, struct input_shaper, sk);
+    if (!is->sx.num_pulses)
+        return is->orig_sk->calc_velocity_cb(is->orig_sk, m, move_time);
+    is->m.start_v = calc_velocity(m, 'x', move_time, &is->sx);
+    return is->orig_sk->calc_velocity_cb(is->orig_sk, &is->m, DUMMY_T);
 }
 
 // Optimized calc_position when only y axis is needed
@@ -137,7 +175,19 @@ shaper_y_calc_position(struct stepper_kinematics *sk, struct move *m
     if (!is->sy.num_pulses)
         return is->orig_sk->calc_position_cb(is->orig_sk, m, move_time);
     is->m.start_pos.y = calc_position(m, 'y', move_time, &is->sy);
+    is->m.start_v = 0.;
     return is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
+}
+
+static double
+shaper_y_calc_velocity(struct stepper_kinematics *sk, struct move *m
+                       , double move_time)
+{
+    struct input_shaper *is = container_of(sk, struct input_shaper, sk);
+    if (!is->sy.num_pulses)
+        return is->orig_sk->calc_velocity_cb(is->orig_sk, m, move_time);
+    is->m.start_v = calc_velocity(m, 'y', move_time, &is->sy);
+    return is->orig_sk->calc_velocity_cb(is->orig_sk, &is->m, DUMMY_T);
 }
 
 // General calc_position for both x and y axes
@@ -149,11 +199,41 @@ shaper_xy_calc_position(struct stepper_kinematics *sk, struct move *m
     if (!is->sx.num_pulses && !is->sy.num_pulses)
         return is->orig_sk->calc_position_cb(is->orig_sk, m, move_time);
     is->m.start_pos = move_get_coord(m, move_time);
+    is->m.start_v = 0.;
     if (is->sx.num_pulses)
         is->m.start_pos.x = calc_position(m, 'x', move_time, &is->sx);
     if (is->sy.num_pulses)
         is->m.start_pos.y = calc_position(m, 'y', move_time, &is->sy);
     return is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
+}
+
+static double
+shaper_xy_calc_velocity(struct stepper_kinematics *sk, struct move *m
+                        , double move_time)
+{
+    struct input_shaper *is = container_of(sk, struct input_shaper, sk);
+    if (!is->sx.num_pulses && !is->sy.num_pulses)
+        return is->orig_sk->calc_velocity_cb(is->orig_sk, m, move_time);
+    double velocity = move_get_velocity(m, move_time);
+    double v_x = velocity * m->axes_r.x;
+    double v_y = velocity * m->axes_r.y;
+    double v_z = velocity * m->axes_r.z;
+    if (is->sx.num_pulses)
+        v_x = calc_velocity(m, 'x', move_time, &is->sx);
+    if (is->sy.num_pulses)
+        v_y = calc_velocity(m, 'y', move_time, &is->sy);
+    double v_nrm = sqrt(v_x * v_x + v_y * v_y + v_z * v_z);
+    if (v_nrm < 1e-10) {
+        memset(&is->m.axes_r, 0, sizeof(is->m.axes_r));
+        is->m.start_v = 0.;
+    } else {
+        double v_recipr = 1. / v_nrm;
+        is->m.start_v = v_nrm;
+        is->m.axes_r.x = v_x * v_recipr;
+        is->m.axes_r.y = v_y * v_recipr;
+        is->m.axes_r.z = v_z * v_recipr;
+    }
+    return is->orig_sk->calc_velocity_cb(is->orig_sk, &is->m, DUMMY_T);
 }
 
 // A callback that forwards post_cb call to the original kinematics
@@ -219,6 +299,16 @@ input_shaper_set_sk(struct stepper_kinematics *sk
     if (orig_sk->post_cb) {
         is->sk.post_cb = shaper_commanded_pos_post_fixup;
     }
+    if (orig_sk->calc_velocity_cb) {
+        if (orig_sk->active_flags == AF_X)
+            is->sk.calc_velocity_cb = shaper_x_calc_velocity;
+        else if (orig_sk->active_flags == AF_Y)
+            is->sk.calc_velocity_cb = shaper_y_calc_velocity;
+        else if (orig_sk->active_flags & (AF_X | AF_Y))
+            is->sk.calc_velocity_cb = shaper_xy_calc_velocity;
+        else
+            return -1;
+    }
     return 0;
 }
 
@@ -253,5 +343,7 @@ input_shaper_alloc(void)
     struct input_shaper *is = malloc(sizeof(*is));
     memset(is, 0, sizeof(*is));
     is->m.move_t = 2. * DUMMY_T;
+    is->m.axes_r.x = 1.;
+    is->m.axes_r.y = 1.;
     return &is->sk;
 }
