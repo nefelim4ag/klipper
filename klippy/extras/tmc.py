@@ -266,6 +266,8 @@ class TMCStallguardDump:
         self.batch_bulk.add_mux_endpoint("tmc/stallguard_dump", "name",
                                          self.stepper_name, api_resp)
         self._setup_register_measure()
+        self.last_print_time = 0
+        self.last_event_time = 0
     # MEASURE_STALLGUARD setup
     def _setup_register_measure(self):
         gcode = self.printer.lookup_object("gcode")
@@ -284,6 +286,14 @@ class TMCStallguardDump:
         self.step_dist_256 = self.step_dist / (1 << mres)
         self.TPWMTHRS = fields.get_field("tpwmthrs")
     def _query_tmc(self, eventtime):
+        if self.last_print_time == 0:
+            toolhead = self.printer.lookup_object('toolhead')
+            self.last_print_time = toolhead.get_last_move_time()
+            self.last_event_time = eventtime
+        tdiff = eventtime - self.last_event_time
+        self.last_print_time = self.last_print_time + tdiff
+        self.last_event_time = eventtime
+        print_time = self.last_print_time
         try:
             # Can be zero somehow, must be set to some safe value or ignored
             tstep = max(1, self.mcu_tmc.get_register("TSTEP"))
@@ -307,7 +317,7 @@ class TMCStallguardDump:
             tmc_freq = self.mcu_tmc.get_tmc_frequency()
             # Trying to support motors with reduction by higher resolution
             velocity = round(tmc_freq * self.step_dist_256 / tstep, 1)
-            d = [(eventtime, velocity, sg_result, cs_actual)]
+            d = [(print_time, velocity, sg_result, cs_actual)]
             return {"data": d}
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
@@ -349,6 +359,7 @@ class TMCStallguardDump:
         if not name.replace("-", "").replace("_", "").isalnum():
             raise gcmd.error("Invalid NAME parameter")
         self.record_data = False
+        self.last_print_time == 0
         filename = "/tmp/%s-%s.csv" % (self.stepper_name, name)
         self._write_to_file(filename)
         self.samples = []
