@@ -235,6 +235,8 @@ class TMCStallguardDump:
         self.stepper_name = ' '.join(config.get_name().split()[1:])
         self.name = config.get_name().split()[-1]
         self.mcu_tmc = mcu_tmc
+        self.mcu = self.mcu_tmc.get_mcu()
+        self.reactor = self.printer.get_reactor()
         fields = self.mcu_tmc.get_fields()
         # It is possible to support TMC2660, just disable it for now
         if not fields.all_fields.get("DRV_STATUS", None):
@@ -286,14 +288,8 @@ class TMCStallguardDump:
         self.step_dist_256 = self.step_dist / (1 << mres)
         self.TPWMTHRS = fields.get_field("tpwmthrs")
     def _query_tmc(self, eventtime):
-        if self.last_print_time == 0:
-            toolhead = self.printer.lookup_object('toolhead')
-            self.last_print_time = toolhead.get_last_move_time()
-            self.last_event_time = eventtime
-        tdiff = eventtime - self.last_event_time
-        self.last_print_time = self.last_print_time + tdiff
-        self.last_event_time = eventtime
-        print_time = self.last_print_time
+        # est_print_time is in the past
+        est_print_time = self.mcu.estimated_print_time(eventtime)
         try:
             # Can be zero somehow, must be set to some safe value or ignored
             tstep = max(1, self.mcu_tmc.get_register("TSTEP"))
@@ -317,6 +313,9 @@ class TMCStallguardDump:
             tmc_freq = self.mcu_tmc.get_tmc_frequency()
             # Trying to support motors with reduction by higher resolution
             velocity = round(tmc_freq * self.step_dist_256 / tstep, 1)
+            curtime = self.reactor.monotonic()
+            used_time = curtime - eventtime
+            print_time = est_print_time + used_time
             d = [(print_time, velocity, sg_result, cs_actual)]
             return {"data": d}
         except self.printer.command_error as e:
