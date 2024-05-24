@@ -121,6 +121,8 @@ def pair_peaks(signals):
     for num in range(0, len(signals) - 1):
         pairs.append([signals[num], signals[num + 1]])
 
+    paired_peaks = []
+
     for pair in pairs:
         signal1 = pair[0]
         signal2 = pair[1]
@@ -137,7 +139,6 @@ def pair_peaks(signals):
         threshold = min(threshold, 10)
 
         # Pair the peaks using the dynamic thresold
-        paired_peaks = []
         unpaired_peaks1 = list(signal1.peaks)
         unpaired_peaks2 = list(signal2.peaks)
 
@@ -160,70 +161,66 @@ def pair_peaks(signals):
             unpaired_peaks1.remove(p1)
             unpaired_peaks2.remove(p2)
 
-        print(paired_peaks)
-        return paired_peaks, unpaired_peaks1, unpaired_peaks2
+    return paired_peaks
 
 ######################################################################
 # Graphing
 ######################################################################
 
 
-def plot_compare_frequency(ax, lognames, signal1, signal2, similarity_factor, max_freq):
-    # Get the belt name for the legend to avoid putting the full file name
-    signal1_mscnt = (lognames[0].split('/')[-1]).split('_')[-1]
-    signal2_mscnt = (lognames[1].split('/')[-1]).split('_')[-1]
-
-    # Plot the two belts PSD signals
-    ax.plot(signal1.freqs, signal1.psd, label='Microstep ' + signal1_mscnt)
-    ax.plot(signal2.freqs, signal2.psd, label='Microstep ' + signal2_mscnt)
+def plot_compare_frequency(ax, lognames, signals, similarity_factor, max_freq):
+    for i in range(0, len(signals)):
+        mscnt = (lognames[i].split('/')[-1]).split('_')[-1]
+        label = 'Microstep ' + mscnt
+        ax.plot(signals[i].freqs, signals[i].psd, label=label)
 
     # Trace the "relax region" (also used as a threshold to filter and detect the peaks)
-    psd_lowest_max = min(signal1.psd.max(), signal2.psd.max())
+    psd_lowest_max = min(signal.psd.max() for signal in signals)
     peaks_warning_threshold = PEAKS_DETECTION_THRESHOLD * psd_lowest_max
     ax.axhline(y=peaks_warning_threshold, color='black', linestyle='--', linewidth=0.5)
-    ax.fill_between(signal1.freqs, 0, peaks_warning_threshold, color='green', alpha=0.15, label='Relax Region')
+    ax.fill_between(signals[0].freqs, 0, peaks_warning_threshold, color='green', alpha=0.15, label='Relax Region')
 
     # Trace and annotate the peaks on the graph
     paired_peak_count = 0
     unpaired_peak_count = 0
     offsets_table_data = []
 
-    for _, (peak1, peak2) in enumerate(signal1.paired_peaks):
-        label = ALPHABET[paired_peak_count]
-        amplitude_offset = abs(
-            ((signal2.psd[peak2[0]] - signal1.psd[peak1[0]]) / max(signal1.psd[peak1[0]], signal2.psd[peak2[0]])) * 100
-        )
-        frequency_offset = abs(signal2.freqs[peak2[0]] - signal1.freqs[peak1[0]])
-        offsets_table_data.append([f'Peaks {label}', f'{frequency_offset:.1f} Hz', f'{amplitude_offset:.1f} %'])
+    # for _, (peak1, peak2) in enumerate(signal1.paired_peaks):
+    #     label = ALPHABET[paired_peak_count]
+    #     amplitude_offset = abs(
+    #         ((signal2.psd[peak2[0]] - signal1.psd[peak1[0]]) / max(signal1.psd[peak1[0]], signal2.psd[peak2[0]])) * 100
+    #     )
+    #     frequency_offset = abs(signal2.freqs[peak2[0]] - signal1.freqs[peak1[0]])
+    #     offsets_table_data.append([f'Peaks {label}', f'{frequency_offset:.1f} Hz', f'{amplitude_offset:.1f} %'])
 
-        ax.plot(signal1.freqs[peak1[0]], signal1.psd[peak1[0]], 'x', color='black')
-        ax.plot(signal2.freqs[peak2[0]], signal2.psd[peak2[0]], 'x', color='black')
-        ax.plot(
-            [signal1.freqs[peak1[0]], signal2.freqs[peak2[0]]],
-            [signal1.psd[peak1[0]], signal2.psd[peak2[0]]],
-            ':',
-            color='gray',
-        )
+    #     ax.plot(signal1.freqs[peak1[0]], signal1.psd[peak1[0]], 'x', color='black')
+    #     ax.plot(signal2.freqs[peak2[0]], signal2.psd[peak2[0]], 'x', color='black')
+    #     ax.plot(
+    #         [signal1.freqs[peak1[0]], signal2.freqs[peak2[0]]],
+    #         [signal1.psd[peak1[0]], signal2.psd[peak2[0]]],
+    #         ':',
+    #         color='gray',
+    #     )
 
-        ax.annotate(
-            label + '1',
-            (signal1.freqs[peak1[0]], signal1.psd[peak1[0]]),
-            textcoords='offset points',
-            xytext=(8, 5),
-            ha='left',
-            fontsize=13,
-            color='black',
-        )
-        ax.annotate(
-            label + '2',
-            (signal2.freqs[peak2[0]], signal2.psd[peak2[0]]),
-            textcoords='offset points',
-            xytext=(8, 5),
-            ha='left',
-            fontsize=13,
-            color='black',
-        )
-        paired_peak_count += 1
+    #     ax.annotate(
+    #         label + '1',
+    #         (signal1.freqs[peak1[0]], signal1.psd[peak1[0]]),
+    #         textcoords='offset points',
+    #         xytext=(8, 5),
+    #         ha='left',
+    #         fontsize=13,
+    #         color='black',
+    #     )
+    #     ax.annotate(
+    #         label + '2',
+    #         (signal2.freqs[peak2[0]], signal2.psd[peak2[0]]),
+    #         textcoords='offset points',
+    #         xytext=(8, 5),
+    #         ha='left',
+    #         fontsize=13,
+    #         color='black',
+    #     )
+    #     paired_peak_count += 1
 
     # for peak in signal1.unpaired_peaks:
     #     ax.plot(signal1.freqs[peak], signal1.psd[peak], 'x', color='black')
@@ -263,8 +260,8 @@ def plot_compare_frequency(ax, lognames, signal1, signal2, similarity_factor, ma
     ax.set_xlabel('Frequency (Hz)')
     ax.set_xlim([0, max_freq])
     ax.set_ylabel('Power spectral density')
-    psd_highest_max = max(signal1.psd.max(), signal2.psd.max())
-    ax.set_ylim([0, psd_highest_max + psd_highest_max * 0.05])
+    psd_highest_max = max(signal.psd.max() for signal in signals)
+    ax.set_ylim([0, psd_highest_max * 1.05])
 
     ax.xaxis.set_minor_locator(matplotlib.ticker.AutoMinorLocator())
     ax.yaxis.set_minor_locator(matplotlib.ticker.AutoMinorLocator())
@@ -330,7 +327,7 @@ def compute_signal_data(data, max_freq):
 ######################################################################
 
 
-def belts_calibration(lognames, max_freq=200.0, st_version=None):
+def microstep_calibration(lognames, max_freq=200.0, st_version=None):
     # Parse data
     datas = [parse_log(fn) for fn in lognames]
     signals = []
@@ -339,13 +336,13 @@ def belts_calibration(lognames, max_freq=200.0, st_version=None):
         signals.append(signal)
 
     # Pair the peaks across the two datasets
-    paired_peaks, unpaired_peaks1, unpaired_peaks2 = pair_peaks(signals)
-    signal1 = signals[0]._replace(paired_peaks=paired_peaks, unpaired_peaks=unpaired_peaks1)
-    signal2 = signals[1]._replace(paired_peaks=paired_peaks, unpaired_peaks=unpaired_peaks2)
+    paired_peaks = pair_peaks(signals)
+    for i in range(0, len(signals)):
+        signals[i] = signals[i]._replace(paired_peaks=paired_peaks)
 
     # Compute the similarity (using cross-correlation of the PSD signals)
     similarity_factor = compute_curve_similarity_factor(
-        signal1.freqs, signal1.psd, signal2.freqs, signal2.psd, CURVE_SIMILARITY_SIGMOID_K
+        signals[0].freqs, signals[0].psd, signals[0].freqs, signals[1].psd, CURVE_SIMILARITY_SIGMOID_K
     )
     print(f'Microsteps estimated similarity: {similarity_factor:.1f}%')
 
@@ -365,7 +362,7 @@ def belts_calibration(lognames, max_freq=200.0, st_version=None):
     fig.set_size_inches(12, 10)
 
     # Plot the graphs
-    plot_compare_frequency(ax1, lognames, signal1, signal2, similarity_factor, max_freq)
+    plot_compare_frequency(ax1, lognames, signals, similarity_factor, max_freq)
 
     return fig
 
@@ -378,48 +375,17 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         help='output file path',
     )
-    parser.add_argument(
-        '-c', '--csv',
-        type=str,
-        required=True,
-        action="append",
-        dest='input_csv',
-        help='csv per microstep position',
-    )
+    parser.add_argument('filenames', nargs='+', help='csv file paths')
     return parser.parse_args()
-
-
-class BeltsGraphCreator():
-    def __init__(self, files, output):
-        self.files = files
-        self.output = output
-        self._dpi = 450
-
-    def create_graph(self) -> None:
-        fig = belts_calibration(
-            lognames=self.files
-        )
-        fig.savefig(self.output, dpi=self._dpi)
 
 def main():
     options = parse_arguments()
 
     # Instantiate the graph creator
-    graph_creator = BeltsGraphCreator(options.input_csv, options.output)
-
-    # And then run it
-    try:
-        graph_creator.create_graph()
-    except FileNotFoundError as e:
-        print(f'FileNotFound error: {e}')
-        return
-    except TimeoutError as e:
-        print(f'Timeout error: {e}')
-        return
-    except Exception as e:
-        print(f'Error while generating the graphs: {e}')
-        traceback.print_exc()
-        return
+    fig = microstep_calibration(
+        lognames=options.filenames
+    )
+    fig.savefig(options.output, dpi=300)
 
 if __name__ == '__main__':
     main()
