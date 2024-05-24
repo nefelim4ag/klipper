@@ -327,7 +327,7 @@ def compute_signal_data(data, max_freq):
 ######################################################################
 
 
-def microstep_calibration(lognames, max_freq=200.0, st_version=None):
+def microstep_calibration(lognames, max_freq=150.0, st_version=None):
     # Parse data
     datas = [parse_log(fn) for fn in lognames]
     signals = []
@@ -347,10 +347,11 @@ def microstep_calibration(lognames, max_freq=200.0, st_version=None):
     print(f'Microsteps estimated similarity: {similarity_factor:.1f}%')
 
     # Create graph layout
-    fig, (ax1) = plt.subplots(
+    fig, (ax1, ax2) = plt.subplots(
+        2,
         1,
         gridspec_kw={
-            'height_ratios': [4],
+            'height_ratios': [4, 4],
             'bottom': 0.050,
             'top': 0.890,
             'left': 0.085,
@@ -359,10 +360,27 @@ def microstep_calibration(lognames, max_freq=200.0, st_version=None):
             'wspace': 0.200,
         },
     )
-    fig.set_size_inches(12, 10)
+    fig.set_size_inches(12, 12)
 
     # Plot the graphs
     plot_compare_frequency(ax1, lognames, signals, similarity_factor, max_freq)
+
+    # Plot peaks
+    ax2.set_xlabel('MSCNT')
+    # ax2.set_xlim([0, 1024])
+    ax2.set_ylabel('Power spectral density')
+    psd_highest_max = max(signal.psd.max() for signal in signals)
+    ax2.set_ylim([0, psd_highest_max * 1.05])
+    ax2.ticklabel_format(axis='y', style='scientific', scilimits=(0, 0))
+    for i in range(0, len(signals)):
+        mscnt = (lognames[i].split('/')[-1]).split('_')[-1]
+        _mscnt = mscnt.split('.')[0]
+        min_mscnt = int(_mscnt.split('-')[0])
+        max_mscnt = int(_mscnt.split('-')[1])
+        mscnts = [mscnt for mscnt in range(min_mscnt, max_mscnt)]
+        for peak in signals[i].peaks:
+            label = f'Microstep {min_mscnt}<={max_mscnt}: peak {peak}'
+            ax2.plot(mscnts, [signals[i].psd[peak] for mscnt in mscnts], label=label)
 
     return fig
 
