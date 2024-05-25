@@ -107,6 +107,12 @@ def main():
         label="SIN CUR_A",
     )
 
+    plt.plot(
+        positions,
+        sin_value_90 + sin_value_180 + sin_value_270 + sin_value,
+        label="SIN CUR_B",
+    )
+
     # Add labels and title
     plt.xlabel("MSCNT (position)")
     plt.ylabel("Microstep current by MSLUT: MSCURACT")
