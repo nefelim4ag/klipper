@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import random
 import matplotlib.pyplot as plt
 
 def mslut_encoder(quarter_seg, START_SIN90):
@@ -60,10 +61,10 @@ def mslut_encoder(quarter_seg, START_SIN90):
             segments[cur_seg]["max"] = nsmax
 
     W = {}
-    W[0] = segments[0]["min"] + 1
-    W[1] = segments[1]["min"] + 1
-    W[2] = segments[2]["min"] + 1
-    W[3] = segments[3]["min"] + 1
+    W[0] = (segments[0]["min"] + 1)
+    W[1] = (segments[1]["min"] + 1) % 4
+    W[2] = (segments[2]["min"] + 1) % 4
+    W[3] = (segments[3]["min"] + 1) % 4
 
     X = {}
     X[1] = segments[1]["start"]
@@ -230,14 +231,6 @@ def main():
     # START_SIN90 gives the absolute current for
     # microstep table entry at positions 256
 
-    # return {
-    #     "START_SIN": quarter_seg[0], # Fisrt value is always START_SIN
-    #     "START_SIN90": START_SIN90,
-    #     "X": X,
-    #     "W": W,
-    #     "MSLUTS": MSLUTS
-    # }
-
     sin_value = mslut_decoder(MSLUTS, W, X, START_SIN, START_SIN90)
     encoded = mslut_encoder(sin_value, START_SIN90)
     if MSLUTS != encoded["MSLUTS"]:
@@ -286,6 +279,33 @@ def main():
         label="SIN CUR_B",
     )
 
+    # Custom table PoC
+    sin_value = []
+    counter = 0
+    rollover = False
+    for i in range(0, 256):
+        sin_value.append(counter)
+        if counter < 248 and not rollover:
+            if i < 134:
+                counter += random.randint(1, 2)
+            else:
+                counter += 1
+        else:
+            rollover = True
+            counter += -random.randint(0, 1)
+    sin_value_90 = sin_value.copy()
+    sin_value_90.reverse()
+
+    # Second half virtual
+    sin_value_180 = [-i for i in sin_value]
+    sin_value_270 = [-i for i in sin_value_90]
+
+    plt.plot(
+        positions,
+        sin_value + sin_value_90 + sin_value_180 + sin_value_270,
+        label="SIN CUR_CUSTOM",
+    )
+
     # # Prusa implementation
     # fac1000 = 170 # 30..200
     # prusa = []
@@ -313,6 +333,10 @@ def main():
     plt.legend()
 
     plt.savefig("mslut-graph.png")
+
+    new = mslut_encoder(sin_value, sin_value[-1])
+    for k in new:
+        print(k, new[k])
 
 if __name__ == "__main__":
     main()
