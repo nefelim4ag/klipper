@@ -360,13 +360,14 @@ def microstep_calibration(lognames, max_freq=150.0, st_version=None):
             'wspace': 0.200,
         },
     )
-    fig.set_size_inches(12, 12)
+    fig.set_size_inches(16, 12)
 
     # Plot the graphs
     plot_compare_frequency(ax1, lognames, signals, similarity_factor, max_freq)
 
     # Plot peaks
     ax2.set_xlabel('MSCNT')
+    ax2.set_xticks([i for i in range(0, 1024, 64)])
     # ax2.set_xlim([0, 1024])
     ax2.set_ylabel('Power spectral density')
     psd_highest_max = max(signal.psd.max() for signal in signals)

@@ -328,6 +328,7 @@ def main():
 
     # Add labels and title
     plt.xlabel("MSCNT (position)")
+    plt.xticks([i for i in range(0, 1024, 64)])
     plt.ylabel("Microstep current by MSLUT: MSCURACT")
     plt.title("TMC MSLUT table view")
     plt.legend()
