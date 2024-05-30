@@ -246,6 +246,8 @@ class HandleStallguard:
          'Current level result of the given stepper driver'),
         ('stallguard(<stepper>,velocity)',
          'Velocity result of the given stepper driver'),
+        ('stallguard(<stepper>,mscnt)',
+         'Velocity result of the given stepper driver'),
     ]
     def __init__(self, lmanager, name, name_parts):
         self.name = name
@@ -270,12 +272,13 @@ class HandleStallguard:
                 if len(data) > 1:
                     raise error(
                         "Stallguard sampling return only one set of value")
-                time, velocity, sg_result, cs_actual = data[0]
+                time, velocity, sg_result, cs_actual, mscnt = data[0]
                 self.data = {
                     "time": time,
                     "velocity": velocity,
                     "sg_result": sg_result,
-                    "cs_actual": cs_actual
+                    "cs_actual": cs_actual,
+                    "mscnt": mscnt
                 }
             # Assume jmsg is ordered
             time = self.data["time"]

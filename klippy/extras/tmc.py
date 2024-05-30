@@ -264,7 +264,7 @@ class TMCStallguardDump:
         self.batch_bulk = bulk_sensor.BatchBulkHelper(
             self.printer, self._query_tmc, self._update_static,
             batch_interval = self.batch_interval)
-        api_resp = {'header': ('time', 'velocity', 'sg_result', 'cs_actual')}
+        api_resp = {'header': ('time', 'velocity', 'sg_result', 'cs_actual', 'mscnt')}
         self.batch_bulk.add_mux_endpoint("tmc/stallguard_dump", "name",
                                          self.stepper_name, api_resp)
         self._setup_register_measure()
@@ -311,12 +311,13 @@ class TMCStallguardDump:
             m = self.cs_actual_mask
             cs_actual = (status & m) >> ffs(m)
             tmc_freq = self.mcu_tmc.get_tmc_frequency()
+            mscnt = self.mcu_tmc.get_register("MSCNT")
             # Trying to support motors with reduction by higher resolution
             velocity = round(tmc_freq * self.step_dist_256 / tstep, 1)
             curtime = self.reactor.monotonic()
             used_time = curtime - eventtime
             print_time = est_print_time + used_time
-            d = [(print_time, velocity, sg_result, cs_actual)]
+            d = [(print_time, velocity, sg_result, cs_actual, mscnt)]
             return {"data": d}
         except self.printer.command_error as e:
             self.printer.invoke_shutdown(str(e))
