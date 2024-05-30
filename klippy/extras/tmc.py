@@ -297,8 +297,8 @@ class TMCStallguardDump:
             # In standstill SG_RESULT shows the chopper on-time.
             # A comparison of the chopper on-time
             # can help to get a rough estimation of motor temperature.
-            if tstep == 0xFFFFF:
-                return {}
+            # if tstep == 0xFFFFF:
+            #     return {}
             status = self.mcu_tmc.get_register("DRV_STATUS")
             if self.SG4 and not self.SG2:
                 # sg mask is 0
