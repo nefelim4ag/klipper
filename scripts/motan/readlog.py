@@ -287,9 +287,6 @@ class HandleStallguard:
                     return
                 return self.data[self.filter]
             self.data = None
-
-
-
 LogHandlers["stallguard"] = HandleStallguard
 
 # Extract stepper motor phase position
