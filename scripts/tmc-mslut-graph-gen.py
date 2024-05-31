@@ -284,15 +284,13 @@ def main():
     counter = 0
     rollover = False
     for i in range(0, 256):
-        sin_value.append(counter)
-        if counter < 248 and not rollover:
-            if i < 134:
-                counter += random.randint(1, 2)
-            else:
-                counter += 1
+        if i < 64:
+            sin_value.append(int(i**1.5/5.5))
         else:
-            rollover = True
-            counter += -random.randint(0, 1)
+            sin_value.append(int(math.sin(i/168) * 248))
+        if i > 2 and (sin_value[-1] - sin_value[-2]) > 2:
+            print(i, sin_value[-1], sin_value[-2])
+            return
     sin_value_90 = sin_value.copy()
     sin_value_90.reverse()
 
@@ -303,7 +301,13 @@ def main():
     plt.plot(
         positions,
         sin_value + sin_value_90 + sin_value_180 + sin_value_270,
-        label="SIN CUR_CUSTOM",
+        label="SIN CUR_CUSTOM A",
+    )
+
+    plt.plot(
+        positions,
+        sin_value_90 + sin_value_180 + sin_value_270 + sin_value,
+        label="SIN CUR_CUSTOM B",
     )
 
     # # Prusa implementation
@@ -329,6 +333,7 @@ def main():
     # Add labels and title
     plt.xlabel("MSCNT (position)")
     plt.xticks([i for i in range(0, 1024, 64)])
+    plt.yticks([i for i in range(0, 256, 16)])
     plt.ylabel("Microstep current by MSLUT: MSCURACT")
     plt.title("TMC MSLUT table view")
     plt.legend()
@@ -336,8 +341,23 @@ def main():
     plt.savefig("mslut-graph.png")
 
     new = mslut_encoder(sin_value, sin_value[-1])
-    for k in new:
-        print(k, new[k])
+    print(f"driver_MSLUT0: {new["MSLUTS"][0]}")
+    print(f"driver_MSLUT1: {new["MSLUTS"][1]}")
+    print(f"driver_MSLUT2: {new["MSLUTS"][2]}")
+    print(f"driver_MSLUT3: {new["MSLUTS"][3]}")
+    print(f"driver_MSLUT4: {new["MSLUTS"][4]}")
+    print(f"driver_MSLUT5: {new["MSLUTS"][5]}")
+    print(f"driver_MSLUT6: {new["MSLUTS"][6]}")
+    print(f"driver_MSLUT7: {new["MSLUTS"][7]}")
+    print(f"driver_W0: {new["W"][0]}")
+    print(f"driver_W1: {new["W"][1]}")
+    print(f"driver_W2: {new["W"][2]}")
+    print(f"driver_W3: {new["W"][3]}")
+    print(f"driver_X1: {new["X"][1]}")
+    print(f"driver_X2: {new["X"][2]}")
+    print(f"driver_X3: {new["X"][3]}")
+    print(f"driver_START_SIN: {new["START_SIN"]}")
+    print(f"driver_START_SIN90: {new["START_SIN90"]}")
 
 if __name__ == "__main__":
     main()
