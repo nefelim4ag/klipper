@@ -97,7 +97,7 @@ def sigmoid_scale(x, k=1):
 
 ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'  # For paired peaks names
 
-PEAKS_DETECTION_THRESHOLD = 0.20
+PEAKS_DETECTION_THRESHOLD = 0.3
 CURVE_SIMILARITY_SIGMOID_K = 0.6
 DC_GRAIN_OF_SALT_FACTOR = 0.75
 DC_THRESHOLD_METRIC = 1.5e9
@@ -168,7 +168,7 @@ def pair_peaks(signals):
 ######################################################################
 
 
-def plot_compare_frequency(ax, lognames, signals, similarity_factor, max_freq):
+def plot_compare_frequency(ax, lognames, signals, similarity_factor, min_freq, max_freq):
     for i in range(0, len(signals)):
         mscnt = (lognames[i].split('/')[-1]).split('_')[-1]
         label = 'Microstep ' + mscnt
@@ -258,7 +258,7 @@ def plot_compare_frequency(ax, lognames, signals, similarity_factor, max_freq):
 
     # Setting axis parameters, grid and graph title
     ax.set_xlabel('Frequency (Hz)')
-    ax.set_xlim([0, max_freq])
+    ax.set_xlim([min_freq, max_freq])
     ax.set_ylabel('Power spectral density')
     psd_highest_max = max(signal.psd.max() for signal in signals)
     ax.set_ylim([0, psd_highest_max * 1.05])
@@ -310,12 +310,12 @@ def plot_compare_frequency(ax, lognames, signals, similarity_factor, max_freq):
 
 
 # Original Klipper function to get the PSD data of a raw accelerometer signal
-def compute_signal_data(data, max_freq):
+def compute_signal_data(data, min_freq, max_freq):
     helper = shaper_calibrate.ShaperCalibrate(printer=None)
     calibration_data = helper.process_accelerometer_data(data)
-
-    freqs = calibration_data.freq_bins[calibration_data.freq_bins <= max_freq]
-    psd = calibration_data.get_psd('all')[calibration_data.freq_bins <= max_freq]
+    freq_filter = (calibration_data.freq_bins >= min_freq) & (calibration_data.freq_bins <= max_freq)
+    freqs = calibration_data.freq_bins[freq_filter]
+    psd = calibration_data.get_psd('all')[freq_filter]
 
     _, peaks, _ = detect_peaks(psd, freqs, PEAKS_DETECTION_THRESHOLD * psd.max())
 
@@ -327,12 +327,12 @@ def compute_signal_data(data, max_freq):
 ######################################################################
 
 
-def microstep_calibration(lognames, max_freq=150.0, st_version=None):
+def microstep_calibration(lognames, min_freq, max_freq):
     # Parse data
     datas = [parse_log(fn) for fn in lognames]
     signals = []
     for data in datas:
-        signal = compute_signal_data(data, max_freq)
+        signal = compute_signal_data(data, min_freq, max_freq)
         signals.append(signal)
 
     # Pair the peaks across the two datasets
@@ -360,14 +360,14 @@ def microstep_calibration(lognames, max_freq=150.0, st_version=None):
             'wspace': 0.200,
         },
     )
-    fig.set_size_inches(16, 12)
+    fig.set_size_inches(32, 12)
 
     # Plot the graphs
-    plot_compare_frequency(ax1, lognames, signals, similarity_factor, max_freq)
+    plot_compare_frequency(ax1, lognames, signals, similarity_factor, min_freq, max_freq)
 
     # Plot peaks
     ax2.set_xlabel('MSCNT')
-    ax2.set_xticks([i for i in range(0, 1024, 64)])
+    ax2.set_xticks([i for i in range(0, 1024, 16)])
     # ax2.set_xlim([0, 1024])
     ax2.set_ylabel('Power spectral density')
     psd_highest_max = max(signal.psd.max() for signal in signals)
@@ -394,6 +394,22 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         help='output file path',
     )
+    parser.add_argument(
+        '-s',
+        '--min-hz',
+        dest='min_hz',
+        type=int,
+        default=30,
+        help='filter out freq below',
+    )
+    parser.add_argument(
+        '-m',
+        '--max-hz',
+        dest='max_hz',
+        type=int,
+        default=130,
+        help='filter out freq above',
+    )
     parser.add_argument('filenames', nargs='+', help='csv file paths')
     return parser.parse_args()
 
@@ -402,8 +418,11 @@ def main():
 
     # Instantiate the graph creator
     fig = microstep_calibration(
-        lognames=options.filenames
+        lognames=options.filenames,
+        min_freq=options.min_hz,
+        max_freq=options.max_hz
     )
+    fig.show()
     fig.savefig(options.output, dpi=300)
 
 if __name__ == '__main__':
