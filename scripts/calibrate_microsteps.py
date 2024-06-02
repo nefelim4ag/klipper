@@ -364,7 +364,15 @@ def microstep_calibration(lognames, min_freq, max_freq):
             'wspace': 0.200,
         },
     )
-    fig.set_size_inches(32, 12)
+    min_mscnt = 1024
+    max_mscnt = 0
+    for i in range(0, len(signals)):
+        mscnt = (lognames[i].split('/')[-1]).split('_')[-1]
+        _mscnt = mscnt.split('.')[0]
+        min_mscnt = min(min_mscnt, int(_mscnt.split('-')[0]))
+        max_mscnt = max(max_mscnt, int(_mscnt.split('-')[1]))
+
+    fig.set_size_inches((max_mscnt - min_mscnt)/32, 12)
 
     # Plot the graphs
     plot_compare_frequency(ax1, lognames, signals, similarity_factor, min_freq, max_freq)
