@@ -127,13 +127,17 @@ def pair_peaks(signals):
         signal1 = pair[0]
         signal2 = pair[1]
         distances = []
+        if len(signal1.peaks) == 0 or len(signal2.peaks):
+            continue
         for p1 in signal1.peaks:
             for p2 in signal2.peaks:
                 distances.append(abs(signal1.freqs[p1] - signal2.freqs[p2]))
         distances = np.array(distances)
-
-        median_distance = np.median(distances)
-        iqr = np.percentile(distances, 75) - np.percentile(distances, 25)
+        try:
+            median_distance = np.median(distances)
+            iqr = np.percentile(distances, 75) - np.percentile(distances, 25)
+        except:
+            continue
 
         threshold = median_distance + 1.5 * iqr
         threshold = min(threshold, 10)
