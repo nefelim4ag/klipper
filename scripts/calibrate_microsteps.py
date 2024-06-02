@@ -387,6 +387,36 @@ def microstep_calibration(lognames, min_freq, max_freq):
             label = f'Microstep {min_mscnt}<={max_mscnt}: peak {peak}'
             ax2.plot(mscnts, [signals[i].psd[peak] for mscnt in mscnts], label=label)
 
+    # Compute and plot AVG line for microsteps
+    min_mscnt = 1024
+    max_mscnt = 0
+    for i in range(0, len(signals)):
+        mscnt = (lognames[i].split('/')[-1]).split('_')[-1]
+        _mscnt = mscnt.split('.')[0]
+        min_mscnt = min(min_mscnt, int(_mscnt.split('-')[0]))
+        max_mscnt = max(max_mscnt, int(_mscnt.split('-')[1]))
+
+    mscnt_buckets = {}
+    for i in range(min_mscnt, max_mscnt + 1):
+        mscnt_buckets[i] = []
+
+    for i in range(0, len(signals)):
+        mscnt = (lognames[i].split('/')[-1]).split('_')[-1]
+        _mscnt = mscnt.split('.')[0]
+        min_mscnt = int(_mscnt.split('-')[0])
+        max_mscnt = int(_mscnt.split('-')[1])
+        for peak in signals[i].peaks:
+            for mscnt in range(min_mscnt, max_mscnt+1):
+                mscnt_buckets[mscnt].append(signals[i].psd[peak])
+    mscnts = []
+    mscnts_avgs = []
+    for mscnt in mscnt_buckets:
+        mscnts.append(mscnt)
+        avg_psd = sum(mscnt_buckets[mscnt])/len(mscnt_buckets[mscnt])
+        mscnts_avgs.append(avg_psd)
+    ax2.plot(mscnts, mscnts_avgs, label="avg psd for microstep")
+
+
     return fig
 
 def parse_arguments() -> argparse.Namespace:
