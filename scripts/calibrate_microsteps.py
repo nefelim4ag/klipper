@@ -420,6 +420,9 @@ def microstep_calibration(lognames, min_freq, max_freq):
     mscnts_avgs = []
     for mscnt in mscnt_buckets:
         mscnts.append(mscnt)
+        if len(mscnt_buckets[mscnt]) == 0:
+            mscnts_avgs.append(0)
+            continue
         avg_psd = sum(mscnt_buckets[mscnt])/len(mscnt_buckets[mscnt])
         mscnts_avgs.append(avg_psd)
     ax2.plot(mscnts, mscnts_avgs, label="avg psd for microstep")
