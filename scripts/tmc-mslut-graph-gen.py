@@ -12,7 +12,7 @@ def mslut_encoder(quarter_seg, START_SIN90):
     prev_v = 0
     for val in quarter_seg:
         delta = val - prev_v
-        if delta > 2 or delta < -1:
+        if delta > 3 or delta < -1:
             print(f"prev: {prev_v}, val: {val} delta can't be encoded")
             return
         prev_v = val
