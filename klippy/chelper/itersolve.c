@@ -29,6 +29,8 @@ static int32_t
 itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
                           , double abs_start, double abs_end)
 {
+    if (sk->pre_cb)
+        sk->pre_cb(sk);
     sk_calc_callback calc_position_cb = sk->calc_position_cb;
     double half_step = .5 * sk->step_dist;
     double start = abs_start - m->print_time, end = abs_end - m->print_time;
@@ -43,7 +45,12 @@ itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
     double last_time=start, low_time=start, high_time=start + SEEK_TIME_RESET;
     if (high_time > end)
         high_time = end;
+    int counter = 0;
     for (;;) {
+        counter++;
+        //sprintf(message, "guess #%i\n", counter);
+        //log_message(message);
+        // printf("guess #%i\n", counter);
         // Use the "secant method" to guess a new time from previous guesses
         double guess_dist = guess.position - target;
         double og_dist = old_guess.position - target;
@@ -263,7 +270,14 @@ itersolve_calc_position_from_coord(struct stepper_kinematics *sk
     m.start_pos.y = y;
     m.start_pos.z = z;
     m.move_t = 1000.;
-    return sk->calc_position_cb(sk, &m, 500.);
+    if (sk->pre_cb) {
+        sk->pre_cb(sk);
+    }
+    double result = sk->calc_position_cb(sk, &m, 500.);
+    if (sk->post_cb) {
+        sk->post_cb(sk);
+    }
+    return result;
 }
 
 void __visible

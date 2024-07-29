@@ -18,11 +18,13 @@
  * Shaper initialization
  ****************************************************************/
 
+#define MAX_PULSES 5
+
 struct shaper_pulses {
     int num_pulses;
     struct {
         double t, a;
-    } pulses[5];
+    } pulses[MAX_PULSES];
 };
 
 // Shift pulses around 'mid-point' t=0 so that the input shaper is an identity
@@ -74,9 +76,34 @@ get_axis_position(struct move *m, int axis, double move_time)
     return start_pos + axis_r * move_dist;
 }
 
-static inline double
-get_axis_position_across_moves(struct move *m, int axis, double time)
+struct cache_entry {
+    double time_delta;
+    struct move* move;
+};
+
+struct cache {
+    struct cache_entry entries[MAX_PULSES];
+};
+
+static struct cache cache_x;
+static struct cache cache_y;
+
+static void clear_cache(struct cache* cache) {
+    for (int i = 0; i < MAX_PULSES; i++) {
+        cache->entries[i].move = NULL;
+    }
+}
+
+static double
+get_axis_position_across_moves(struct move *m, int axis, double time, struct cache_entry* cache_entry)
 {
+    double time_delta = 0;
+    if (cache_entry->move != NULL) {
+        m = cache_entry->move;
+        time_delta = cache_entry->time_delta;
+    }
+    time += time_delta;
+    double initial_time = time;
     while (likely(time < 0.)) {
         m = list_prev_entry(m, node);
         time += m->move_t;
@@ -85,19 +112,22 @@ get_axis_position_across_moves(struct move *m, int axis, double time)
         time -= m->move_t;
         m = list_next_entry(m, node);
     }
+    cache_entry->move = m;
+    cache_entry->time_delta = time_delta + time - initial_time;
     return get_axis_position(m, axis, time);
 }
 
 // Calculate the position from the convolution of the shaper with input signal
-static inline double
+static double
 calc_position(struct move *m, int axis, double move_time
-              , struct shaper_pulses *sp)
+              , struct shaper_pulses *sp, struct cache* cache)
 {
     double res = 0.;
     int num_pulses = sp->num_pulses, i;
     for (i = 0; i < num_pulses; ++i) {
         double t = sp->pulses[i].t, a = sp->pulses[i].a;
-        res += a * get_axis_position_across_moves(m, axis, move_time + t);
+        struct cache_entry* cache_entry = &cache->entries[i];
+        res += a * get_axis_position_across_moves(m, axis, move_time + t, cache_entry);
     }
     return res;
 }
@@ -124,7 +154,7 @@ shaper_x_calc_position(struct stepper_kinematics *sk, struct move *m
     struct input_shaper *is = container_of(sk, struct input_shaper, sk);
     if (!is->sx.num_pulses)
         return is->orig_sk->calc_position_cb(is->orig_sk, m, move_time);
-    is->m.start_pos.x = calc_position(m, 'x', move_time, &is->sx);
+    is->m.start_pos.x = calc_position(m, 'x', move_time, &is->sx, &cache_x);
     return is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
 }
 
@@ -136,7 +166,7 @@ shaper_y_calc_position(struct stepper_kinematics *sk, struct move *m
     struct input_shaper *is = container_of(sk, struct input_shaper, sk);
     if (!is->sy.num_pulses)
         return is->orig_sk->calc_position_cb(is->orig_sk, m, move_time);
-    is->m.start_pos.y = calc_position(m, 'y', move_time, &is->sy);
+    is->m.start_pos.y = calc_position(m, 'y', move_time, &is->sy, &cache_y);
     return is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
 }
 
@@ -150,10 +180,18 @@ shaper_xy_calc_position(struct stepper_kinematics *sk, struct move *m
         return is->orig_sk->calc_position_cb(is->orig_sk, m, move_time);
     is->m.start_pos = move_get_coord(m, move_time);
     if (is->sx.num_pulses)
-        is->m.start_pos.x = calc_position(m, 'x', move_time, &is->sx);
+        is->m.start_pos.x = calc_position(m, 'x', move_time, &is->sx, &cache_x);
     if (is->sy.num_pulses)
-        is->m.start_pos.y = calc_position(m, 'y', move_time, &is->sy);
-    return is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
+        is->m.start_pos.y = calc_position(m, 'y', move_time, &is->sy, &cache_y);
+    double result = is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
+    return result;
+}
+
+static void
+shaper_clear_cache(struct stepper_kinematics *sk)
+{
+    clear_cache(&cache_x);
+    clear_cache(&cache_y);
 }
 
 // A callback that forwards post_cb call to the original kinematics
@@ -179,6 +217,8 @@ input_shaper_set_sk(struct stepper_kinematics *sk
         is->sk.calc_position_cb = shaper_xy_calc_position;
     else
         return -1;
+    is->sk.pre_cb = shaper_clear_cache;
+    is->sk.post_cb = shaper_clear_cache;
     is->sk.active_flags = orig_sk->active_flags;
     is->orig_sk = orig_sk;
     is->sk.commanded_pos = orig_sk->commanded_pos;
