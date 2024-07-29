@@ -129,15 +129,16 @@ static void clear_cache(struct cache* cache) {
 }
 
 static double
-get_axis_position_across_moves(struct move *m, int axis, double time, struct cache_entry* cacheEntry)
+get_axis_position_across_moves(struct move *m, int axis, double time, struct cache_entry* cache_entry)
 {
-    if (cacheEntry->move != NULL) {
-        m = cacheEntry->move;
-        time += cacheEntry->time_delta;
+    if (cache_entry->move != NULL) {
+        m = cache_entry->move;
+        printf("time %f delta %f adjust %f", time, cache_entry->time_delta, time + cache_entry->time_delta);
+        time += cache_entry->time_delta;
     }
     int up = 0;
     int down = 0;
-    double initialTime = time;
+    double initial_time = time;
     while (likely(time < 0.)) {
         m = list_prev_entry_f(m);
         down++;
@@ -148,8 +149,9 @@ get_axis_position_across_moves(struct move *m, int axis, double time, struct cac
         m = list_next_entry_f(m);
         up++;
     }
-    //cacheEntry->move = m;
-    //cacheEntry->time_delta = time - initialTime;
+    cache_entry->move = m;
+    cache_entry->time_delta = time - initial_time;
+    printf("initial_time %f time %f delta %f", initial_time, time, cache_entry->time_delta);
     // char message[128];
     // sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
     // log_message(message);
