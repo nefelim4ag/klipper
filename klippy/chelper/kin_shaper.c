@@ -96,25 +96,6 @@ get_axis_position_across_moves(struct move *m, int axis, double time)
     return get_axis_position(m, axis, time);
 }
 
-static double
-get_axis_position_across_moves_2(struct move **pm, int axis, double *pTime)
-{
-    struct move* m = *pm;
-    double time = *pTime;
-    while (likely(time < 0.)) {
-        m = list_prev_entry_f(m);
-        time += m->move_t;
-    }
-    while (likely(time > m->move_t)) {
-        time -= m->move_t;
-        m = list_next_entry_f(m);
-    }
-    double result = get_axis_position(m, axis, time);
-    *pm = m;
-    *pTime = time;
-    return result;
-}
-
 #include <fcntl.h>   // For open()
 #include <unistd.h>  // For write() and close()
 #include <stdio.h>
@@ -141,6 +122,32 @@ void log_message(const char *message) {
     log_buffer_index += message_len;
 }
 
+static double
+get_axis_position_across_moves_2(struct move **pm, int axis, double *pTime)
+{
+    struct move* m = *pm;
+    double time = *pTime;
+    int up = 0;
+    int down = 0;
+    while (likely(time < 0.)) {
+        m = list_prev_entry_f(m);
+        down++;
+        time += m->move_t;
+    }
+    while (likely(time > m->move_t)) {
+        time -= m->move_t;
+        m = list_next_entry_f(m);
+        up++;
+    }
+    char message[128];
+    sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
+    log_message(message);
+    double result = get_axis_position(m, axis, time);
+    *pm = m;
+    *pTime = time;
+    return result;
+}
+
 // Calculate the position from the convolution of the shaper with input signal
 static double
 calc_position(struct move *m, int axis, double move_time
@@ -151,10 +158,7 @@ calc_position(struct move *m, int axis, double move_time
     double zalupa_move_time = move_time;
     int num_pulses = sp->num_pulses, i;
     if (fd == -99)
-        fd = open("/tmp/calc_position_debug.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
-    char message[128];
-    sprintf(message, "num_pulses: %d\n", num_pulses);
-    log_message(message);
+        fd = open("/tmp/get_axis_position_debug.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
     for (i = 0; i < num_pulses; ++i) {
         double t = sp->pulses[i].t, a = sp->pulses[i].a;
         zalupa_move_time += t;
