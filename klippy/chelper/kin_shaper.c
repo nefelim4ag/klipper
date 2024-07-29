@@ -115,6 +115,32 @@ get_axis_position_across_moves_2(struct move **pm, int axis, double *pTime)
     return result;
 }
 
+#include <fcntl.h>   // For open()
+#include <unistd.h>  // For write() and close()
+#include <stdio.h>
+#include <string.h>
+
+#define LOG_BUFFER_SIZE 4096
+static int fd = -99;
+static char log_buffer[LOG_BUFFER_SIZE];
+static size_t log_buffer_index = 0;
+
+void flush_log_buffer() {
+    if (log_buffer_index > 0) {
+        write(fd, log_buffer, log_buffer_index);
+        log_buffer_index = 0;
+    }
+}
+
+void log_message(const char *message) {
+    size_t message_len = strlen(message);
+    if (log_buffer_index + message_len >= LOG_BUFFER_SIZE) {
+        flush_log_buffer();
+    }
+    memcpy(log_buffer + log_buffer_index, message, message_len);
+    log_buffer_index += message_len;
+}
+
 // Calculate the position from the convolution of the shaper with input signal
 static double
 calc_position(struct move *m, int axis, double move_time
@@ -124,6 +150,11 @@ calc_position(struct move *m, int axis, double move_time
     struct move *zalupa = m;
     double zalupa_move_time = move_time;
     int num_pulses = sp->num_pulses, i;
+    if (fd == -99)
+        fd = open("/tmp/calc_position_debug.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
+    char message[128];
+    sprintf(message, "num_pulses: %d\n", num_pulses);
+    log_message(message);
     for (i = 0; i < num_pulses; ++i) {
         double t = sp->pulses[i].t, a = sp->pulses[i].a;
         zalupa_move_time += t;
