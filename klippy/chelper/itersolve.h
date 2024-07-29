@@ -23,6 +23,8 @@ struct stepper_kinematics {
 
     sk_calc_callback calc_position_cb;
     sk_post_callback post_cb;
+
+    sk_post_callback cache_clr;
 };
 
 int32_t itersolve_generate_steps(struct stepper_kinematics *sk
