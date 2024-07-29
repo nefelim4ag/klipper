@@ -18,11 +18,13 @@
  * Shaper initialization
  ****************************************************************/
 
+#define MAX_PULSES 5
+
 struct shaper_pulses {
     int num_pulses;
     struct {
         double t, a;
-    } pulses[5];
+    } pulses[MAX_PULSES];
 };
 
 // Shift pulses around 'mid-point' t=0 so that the input shaper is an identity
@@ -108,11 +110,34 @@ static void log_message(const char *message) {
     log_buffer_index += message_len;
 }
 
+struct cache_entry {
+    double time_delta;
+    struct move* move;
+};
+
+struct cache {
+    struct cache_entry entries[MAX_PULSES];
+};
+
+static struct cache cache_x;
+static struct cache cache_y;
+
+static void clear_cache(struct cache* cache) {
+    for (int i = 0; i < MAX_PULSES; i++) {
+        cache->entries[i].move = NULL;
+    }
+}
+
 static double
-get_axis_position_across_moves(struct move *m, int axis, double time)
+get_axis_position_across_moves(struct move *m, int axis, double time, struct cache_entry* cacheEntry)
 {
+    if (cacheEntry->move != NULL) {
+        m = cacheEntry->move;
+        time += cacheEntry->time_delta;
+    }
     int up = 0;
     int down = 0;
+    double initialTime = time;
     while (likely(time < 0.)) {
         m = list_prev_entry_f(m);
         down++;
@@ -123,54 +148,27 @@ get_axis_position_across_moves(struct move *m, int axis, double time)
         m = list_next_entry_f(m);
         up++;
     }
+    cacheEntry->move = m;
+    cacheEntry->time_delta = time - initialTime;
     // char message[128];
     // sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
     // log_message(message);
     return get_axis_position(m, axis, time);
 }
 
-static double
-get_axis_position_across_moves_2(struct move **pm, int axis, double *pTime)
-{
-    struct move* m = *pm;
-    double time = *pTime;
-    int up = 0;
-    int down = 0;
-    while (likely(time < 0.)) {
-        m = list_prev_entry_f(m);
-        down++;
-        time += m->move_t;
-    }
-    while (likely(time > m->move_t)) {
-        time -= m->move_t;
-        m = list_next_entry_f(m);
-        up++;
-    }
-    // char message[128];
-    // sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
-    // log_message(message);
-    double result = get_axis_position(m, axis, time);
-    *pm = m;
-    *pTime = time;
-    return result;
-}
-
 // Calculate the position from the convolution of the shaper with input signal
 static double
 calc_position(struct move *m, int axis, double move_time
-              , struct shaper_pulses *sp)
+              , struct shaper_pulses *sp, struct cache* cache)
 {
     double res = 0.;
-    struct move *zalupa = m;
-    double zalupa_move_time = move_time;
     int num_pulses = sp->num_pulses, i;
     if (fd == -99)
         fd = open("/tmp/get_axis_position_debug.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
     for (i = 0; i < num_pulses; ++i) {
         double t = sp->pulses[i].t, a = sp->pulses[i].a;
-        // zalupa_move_time += t;
-        // res += a * get_axis_position_across_moves_2(&zalupa, axis, &zalupa_move_time);
-        res += a * get_axis_position_across_moves(m, axis, move_time + t);
+        struct cache_entry* cache_entry = &cache->entries[i];
+        res += a * get_axis_position_across_moves(m, axis, move_time + t, cache_entry);
     }
     return res;
 }
@@ -197,7 +195,7 @@ shaper_x_calc_position(struct stepper_kinematics *sk, struct move *m
     struct input_shaper *is = container_of(sk, struct input_shaper, sk);
     if (!is->sx.num_pulses)
         return is->orig_sk->calc_position_cb(is->orig_sk, m, move_time);
-    is->m.start_pos.x = calc_position(m, 'x', move_time, &is->sx);
+    is->m.start_pos.x = calc_position(m, 'x', move_time, &is->sx, &cache_x);
     return is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
 }
 
@@ -209,7 +207,7 @@ shaper_y_calc_position(struct stepper_kinematics *sk, struct move *m
     struct input_shaper *is = container_of(sk, struct input_shaper, sk);
     if (!is->sy.num_pulses)
         return is->orig_sk->calc_position_cb(is->orig_sk, m, move_time);
-    is->m.start_pos.y = calc_position(m, 'y', move_time, &is->sy);
+    is->m.start_pos.y = calc_position(m, 'y', move_time, &is->sy, &cache_y);
     return is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
 }
 
@@ -223,9 +221,9 @@ shaper_xy_calc_position(struct stepper_kinematics *sk, struct move *m
         return is->orig_sk->calc_position_cb(is->orig_sk, m, move_time);
     is->m.start_pos = move_get_coord(m, move_time);
     if (is->sx.num_pulses)
-        is->m.start_pos.x = calc_position(m, 'x', move_time, &is->sx);
+        is->m.start_pos.x = calc_position(m, 'x', move_time, &is->sx, &cache_x);
     if (is->sy.num_pulses)
-        is->m.start_pos.y = calc_position(m, 'y', move_time, &is->sy);
+        is->m.start_pos.y = calc_position(m, 'y', move_time, &is->sy, &cache_y);
     return is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
 }
 
@@ -234,12 +232,19 @@ input_shaper_set_sk(struct stepper_kinematics *sk
                     , struct stepper_kinematics *orig_sk)
 {
     struct input_shaper *is = container_of(sk, struct input_shaper, sk);
-    if (orig_sk->active_flags == AF_X)
+    if (orig_sk->active_flags == AF_X) {
         is->sk.calc_position_cb = shaper_x_calc_position;
-    else if (orig_sk->active_flags == AF_Y)
+        clear_cache(&cache_x);
+    }
+    else if (orig_sk->active_flags == AF_Y) {
         is->sk.calc_position_cb = shaper_y_calc_position;
-    else if (orig_sk->active_flags & (AF_X | AF_Y))
+        clear_cache(&cache_y);
+    }
+    else if (orig_sk->active_flags & (AF_X | AF_Y)) {
         is->sk.calc_position_cb = shaper_xy_calc_position;
+        clear_cache(&cache_x);
+        clear_cache(&cache_y);
+    }
     else
         return -1;
     is->sk.active_flags = orig_sk->active_flags;
