@@ -133,7 +133,7 @@ get_axis_position_across_moves(struct move *m, int axis, double time, struct cac
 {
     if (cache_entry->move != NULL) {
         m = cache_entry->move;
-        printf("time %f delta %f adjust %f", time, cache_entry->time_delta, time + cache_entry->time_delta);
+        printf("time %f delta %f adjust %f\n", time, cache_entry->time_delta, time + cache_entry->time_delta);
         time += cache_entry->time_delta;
     }
     int up = 0;
@@ -151,7 +151,7 @@ get_axis_position_across_moves(struct move *m, int axis, double time, struct cac
     }
     cache_entry->move = m;
     cache_entry->time_delta = time - initial_time;
-    printf("initial_time %f time %f delta %f", initial_time, time, cache_entry->time_delta);
+    printf("initial_time %f time %f delta %f\n", initial_time, time, cache_entry->time_delta);
     // char message[128];
     // sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
     // log_message(message);
