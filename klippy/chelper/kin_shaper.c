@@ -148,8 +148,8 @@ get_axis_position_across_moves(struct move *m, int axis, double time, struct cac
         m = list_next_entry_f(m);
         up++;
     }
-    cacheEntry->move = m;
-    cacheEntry->time_delta = time - initialTime;
+    //cacheEntry->move = m;
+    //cacheEntry->time_delta = time - initialTime;
     // char message[128];
     // sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
     // log_message(message);
