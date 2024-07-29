@@ -24,32 +24,6 @@ struct timepos {
 
 #define SEEK_TIME_RESET 0.000100
 
-#include <fcntl.h>   // For open()
-#include <unistd.h>  // For write() and close()
-#include <stdio.h>
-#include <string.h>
-
-#define LOG_BUFFER_SIZE 4096
-static int fd = -99;
-static char log_buffer[LOG_BUFFER_SIZE];
-static size_t log_buffer_index = 0;
-
-static void flush_log_buffer() {
-    if (log_buffer_index > 0) {
-        write(fd, log_buffer, log_buffer_index);
-        log_buffer_index = 0;
-    }
-}
-
-static void log_message(const char *message) {
-    size_t message_len = strlen(message);
-    if (log_buffer_index + message_len >= LOG_BUFFER_SIZE) {
-        flush_log_buffer();
-    }
-    memcpy(log_buffer + log_buffer_index, message, message_len);
-    log_buffer_index += message_len;
-}
-
 // Generate step times for a portion of a move
 static int32_t
 itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
@@ -57,8 +31,6 @@ itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
 {
     if (sk->pre_cb)
         sk->pre_cb(sk);
-    if (fd == -99)
-        fd = open("/tmp/itersolve_gen_steps_range.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
     sk_calc_callback calc_position_cb = sk->calc_position_cb;
     double half_step = .5 * sk->step_dist;
     double start = abs_start - m->print_time, end = abs_end - m->print_time;
@@ -73,12 +45,7 @@ itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
     double last_time=start, low_time=start, high_time=start + SEEK_TIME_RESET;
     if (high_time > end)
         high_time = end;
-    int counter = 0;
     for (;;) {
-        counter++;
-        char message[128];
-        sprintf(message, "itersolve_gen_steps_range: guess #%d\n", counter);
-        log_message(message);
         // Use the "secant method" to guess a new time from previous guesses
         double guess_dist = guess.position - target;
         double og_dist = old_guess.position - target;
