@@ -92,14 +92,14 @@ static int fd = -99;
 static char log_buffer[LOG_BUFFER_SIZE];
 static size_t log_buffer_index = 0;
 
-void flush_log_buffer() {
+static void flush_log_buffer() {
     if (log_buffer_index > 0) {
         write(fd, log_buffer, log_buffer_index);
         log_buffer_index = 0;
     }
 }
 
-void log_message(const char *message) {
+static void log_message(const char *message) {
     size_t message_len = strlen(message);
     if (log_buffer_index + message_len >= LOG_BUFFER_SIZE) {
         flush_log_buffer();
