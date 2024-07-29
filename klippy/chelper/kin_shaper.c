@@ -82,20 +82,6 @@ static struct move *list_next_entry_f(struct move *m){
     return container_of(m->node.next, typeof(*m), node);
 }
 
-static double
-get_axis_position_across_moves(struct move *m, int axis, double time)
-{
-    while (likely(time < 0.)) {
-        m = list_prev_entry_f(m);
-        time += m->move_t;
-    }
-    while (likely(time > m->move_t)) {
-        time -= m->move_t;
-        m = list_next_entry_f(m);
-    }
-    return get_axis_position(m, axis, time);
-}
-
 #include <fcntl.h>   // For open()
 #include <unistd.h>  // For write() and close()
 #include <stdio.h>
@@ -120,6 +106,27 @@ void log_message(const char *message) {
     }
     memcpy(log_buffer + log_buffer_index, message, message_len);
     log_buffer_index += message_len;
+}
+
+static double
+get_axis_position_across_moves(struct move *m, int axis, double time)
+{
+    int up = 0;
+    int down = 0;
+    while (likely(time < 0.)) {
+        m = list_prev_entry_f(m);
+        down++;
+        time += m->move_t;
+    }
+    while (likely(time > m->move_t)) {
+        time -= m->move_t;
+        m = list_next_entry_f(m);
+        up++;
+    }
+    char message[128];
+    sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
+    log_message(message);
+    return get_axis_position(m, axis, time);
 }
 
 static double
@@ -161,8 +168,9 @@ calc_position(struct move *m, int axis, double move_time
         fd = open("/tmp/get_axis_position_debug.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
     for (i = 0; i < num_pulses; ++i) {
         double t = sp->pulses[i].t, a = sp->pulses[i].a;
-        zalupa_move_time += t;
-        res += a * get_axis_position_across_moves_2(&zalupa, axis, &zalupa_move_time);
+        // zalupa_move_time += t;
+        // res += a * get_axis_position_across_moves_2(&zalupa, axis, &zalupa_move_time);
+        res += a * get_axis_position_across_moves(m, axis, move_time + t);
     }
     return res;
 }
