@@ -29,6 +29,8 @@ static int32_t
 itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
                           , double abs_start, double abs_end)
 {
+    if (sk->cache_clr)
+        sk->cache_clr(sk);
     sk_calc_callback calc_position_cb = sk->calc_position_cb;
     double half_step = .5 * sk->step_dist;
     double start = abs_start - m->print_time, end = abs_end - m->print_time;
@@ -124,6 +126,8 @@ itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
     sk->commanded_pos = target - (sdir ? half_step : -half_step);
     if (sk->post_cb)
         sk->post_cb(sk);
+    if (sk->cache_clr)
+        sk->cache_clr(sk);
     return 0;
 }
 
@@ -263,7 +267,12 @@ itersolve_calc_position_from_coord(struct stepper_kinematics *sk
     m.start_pos.y = y;
     m.start_pos.z = z;
     m.move_t = 1000.;
-    return sk->calc_position_cb(sk, &m, 500.);
+    if (sk->cache_clr)
+        sk->cache_clr(sk);
+    double result = sk->calc_position_cb(sk, &m, 500.);
+    if (sk->cache_clr)
+        sk->cache_clr(sk);
+    return result;
 }
 
 void __visible
