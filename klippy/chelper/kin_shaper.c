@@ -171,7 +171,7 @@ calc_position(struct move *m, int axis, double move_time
     if (fd == -99)
         fd = open("/tmp/get_axis_position_debug.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
     for (i = 0; i < num_pulses; ++i) {
-        printf("calc_position pulse %i\n", axis);
+        printf("calc_position pulse %i\n", i);
         double t = sp->pulses[i].t, a = sp->pulses[i].a;
         struct cache_entry* cache_entry = &cache->entries[i];
         res += a * get_axis_position_across_moves(m, axis, move_time + t, cache_entry);
