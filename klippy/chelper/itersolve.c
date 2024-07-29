@@ -50,7 +50,7 @@ itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
     int counter = 0;
     for (;;) {
         counter++;
-        printf("guess #%i\n", counter);
+        // printf("guess #%i\n", counter);
         // Use the "secant method" to guess a new time from previous guesses
         double guess_dist = guess.position - target;
         double og_dist = old_guess.position - target;

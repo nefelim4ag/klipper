@@ -136,7 +136,7 @@ get_axis_position_across_moves(struct move *m, int axis, double time, struct cac
         m = cache_entry->move;
         time_delta = cache_entry->time_delta;
     }
-    printf("T+dt: %f + %f = %f\n", time, time_delta, time + time_delta);
+    // printf("T+dt: %f + %f = %f\n", time, time_delta, time + time_delta);
     time += time_delta;
     int up = 0;
     int down = 0;
@@ -153,7 +153,7 @@ get_axis_position_across_moves(struct move *m, int axis, double time, struct cac
     }
     cache_entry->move = m;
     cache_entry->time_delta = time_delta + time - initial_time;
-    printf("%f - %f = %f\n", time, initial_time, time - initial_time);
+    // printf("%f - %f = %f\n", time, initial_time, time - initial_time);
     // char message[128];
     // sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
     // log_message(message);
@@ -165,13 +165,13 @@ static double
 calc_position(struct move *m, int axis, double move_time
               , struct shaper_pulses *sp, struct cache* cache)
 {
-    printf("calc_position axis %i\n", axis);
+    // printf("calc_position axis %i\n", axis);
     double res = 0.;
     int num_pulses = sp->num_pulses, i;
     if (fd == -99)
         fd = open("/tmp/get_axis_position_debug.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
     for (i = 0; i < num_pulses; ++i) {
-        printf("calc_position pulse %i\n", i);
+        // printf("calc_position pulse %i\n", i);
         double t = sp->pulses[i].t, a = sp->pulses[i].a;
         struct cache_entry* cache_entry = &cache->entries[i];
         res += a * get_axis_position_across_moves(m, axis, move_time + t, cache_entry);
