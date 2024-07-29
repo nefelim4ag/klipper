@@ -24,6 +24,8 @@ struct timepos {
 
 #define SEEK_TIME_RESET 0.000100
 
+#include <stdio.h> // memset
+
 // Generate step times for a portion of a move
 static int32_t
 itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
@@ -45,7 +47,10 @@ itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
     double last_time=start, low_time=start, high_time=start + SEEK_TIME_RESET;
     if (high_time > end)
         high_time = end;
+    int counter = 0;
     for (;;) {
+        counter++;
+        printf("guess #%i\n", counter);
         // Use the "secant method" to guess a new time from previous guesses
         double guess_dist = guess.position - target;
         double og_dist = old_guess.position - target;
