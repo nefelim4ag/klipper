@@ -55,6 +55,8 @@ static int32_t
 itersolve_gen_steps_range(struct stepper_kinematics *sk, struct move *m
                           , double abs_start, double abs_end)
 {
+    if (sk->pre_cb)
+        sk->pre_cb(sk);
     if (fd == -99)
         fd = open("/tmp/itersolve_gen_steps_range.log", O_WRONLY | O_APPEND | O_CREAT, 0644);
     sk_calc_callback calc_position_cb = sk->calc_position_cb;

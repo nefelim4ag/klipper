@@ -227,26 +227,27 @@ shaper_xy_calc_position(struct stepper_kinematics *sk, struct move *m
     return is->orig_sk->calc_position_cb(is->orig_sk, &is->m, DUMMY_T);
 }
 
+static void
+shaper_clear_cache(struct stepper_kinematics *sk)
+{
+    clear_cache(&cache_x);
+    clear_cache(&cache_y);
+}
+
 int __visible
 input_shaper_set_sk(struct stepper_kinematics *sk
                     , struct stepper_kinematics *orig_sk)
 {
     struct input_shaper *is = container_of(sk, struct input_shaper, sk);
-    if (orig_sk->active_flags == AF_X) {
+    if (orig_sk->active_flags == AF_X)
         is->sk.calc_position_cb = shaper_x_calc_position;
-        clear_cache(&cache_x);
-    }
-    else if (orig_sk->active_flags == AF_Y) {
+    else if (orig_sk->active_flags == AF_Y)
         is->sk.calc_position_cb = shaper_y_calc_position;
-        clear_cache(&cache_y);
-    }
-    else if (orig_sk->active_flags & (AF_X | AF_Y)) {
+    else if (orig_sk->active_flags & (AF_X | AF_Y))
         is->sk.calc_position_cb = shaper_xy_calc_position;
-        clear_cache(&cache_x);
-        clear_cache(&cache_y);
-    }
     else
         return -1;
+    is->sk.pre_cb = shaper_clear_cache;
     is->sk.active_flags = orig_sk->active_flags;
     is->orig_sk = orig_sk;
     is->sk.commanded_pos = orig_sk->commanded_pos;
