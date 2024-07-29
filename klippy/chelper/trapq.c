@@ -8,14 +8,62 @@
 #include <stddef.h> // offsetof
 #include <stdlib.h> // malloc
 #include <string.h> // memset
+#include <stdint.h> // uint64
 #include "compiler.h" // unlikely
 #include "trapq.h" // move_get_coord
+
+#define MOVE_CACHE_SIZE 4096
+#define CACHE_SLOT_SIZE (sizeof(uint32_t) * 8)
+#define CACHE_SLOTS_SIZE (MOVE_CACHE_SIZE / CACHE_SLOT_SIZE)
+struct move_pool {
+    uint64_t slots[CACHE_SLOTS_SIZE];
+    struct move cache[MOVE_CACHE_SIZE];
+};
+
+static struct move_pool move_cache = {0};
+
+struct move *pool_malloc() {
+    int slot = -1;
+    for (int i = 0; i < CACHE_SLOTS_SIZE; i++) {
+        if (move_cache.slots[i] != UINT32_MAX) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot >= 0) {
+        for (int i = 0; i < CACHE_SLOT_SIZE; i++) {
+            uint32_t use_bit = 1UL << i;
+            if (!(move_cache.slots[slot] & use_bit)) {
+                move_cache.slots[slot] |= use_bit;
+                return (void *)&move_cache.cache[slot * CACHE_SLOT_SIZE + i];
+            }
+        }
+    }
+
+    return (struct move *)malloc(sizeof(struct move));
+}
+
+
+void pool_free(void *p) {
+    const struct move *start = &move_cache.cache[0];
+    const struct move *end = &move_cache.cache[MOVE_CACHE_SIZE - 1];
+    if (p >= (void *)start && p <= (void *)end) {
+        struct move *entry = (struct move *)p;
+        int i = entry - start;
+        int slot = i / CACHE_SLOT_SIZE;
+        int offset = i % CACHE_SLOT_SIZE;
+        move_cache.slots[slot] &= ~(1UL << offset);
+    } else {
+        free(p);
+    }
+}
+
 
 // Allocate a new 'move' object
 struct move *
 move_alloc(void)
 {
-    struct move *m = malloc(sizeof(*m));
+    struct move *m = pool_malloc();
     memset(m, 0, sizeof(*m));
     return m;
 }
@@ -62,12 +110,12 @@ trapq_free(struct trapq *tq)
     while (!list_empty(&tq->moves)) {
         struct move *m = list_first_entry(&tq->moves, struct move, node);
         list_del(&m->node);
-        free(m);
+        pool_free(m);
     }
     while (!list_empty(&tq->history)) {
         struct move *m = list_first_entry(&tq->history, struct move, node);
         list_del(&m->node);
-        free(m);
+        pool_free(m);
     }
     free(tq);
 }
@@ -183,7 +231,7 @@ trapq_finalize_moves(struct trapq *tq, double print_time
         if (m->start_v || m->half_accel)
             list_add_head(&m->node, &tq->history);
         else
-            free(m);
+            pool_free(m);
     }
     // Free old moves from history list
     if (list_empty(&tq->history))
@@ -194,7 +242,7 @@ trapq_finalize_moves(struct trapq *tq, double print_time
         if (m == latest || m->print_time + m->move_t > clear_history_time)
             break;
         list_del(&m->node);
-        free(m);
+        pool_free(m);
     }
 }
 
@@ -215,7 +263,7 @@ trapq_set_position(struct trapq *tq, double print_time
             break;
         }
         list_del(&m->node);
-        free(m);
+        pool_free(m);
     }
 
     // Add a marker to the trapq history
