@@ -230,7 +230,6 @@ shaper_xy_calc_position(struct stepper_kinematics *sk, struct move *m
 static void
 shaper_clear_cache(struct stepper_kinematics *sk)
 {
-    printf("shaper_clear_cache");
     clear_cache(&cache_x);
     clear_cache(&cache_y);
 }
@@ -249,6 +248,7 @@ input_shaper_set_sk(struct stepper_kinematics *sk
     else
         return -1;
     is->sk.pre_cb = shaper_clear_cache;
+    is->sk.post_cb = shaper_clear_cache;
     is->sk.active_flags = orig_sk->active_flags;
     is->orig_sk = orig_sk;
     is->sk.commanded_pos = orig_sk->commanded_pos;
