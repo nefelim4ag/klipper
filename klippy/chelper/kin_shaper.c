@@ -102,12 +102,12 @@ get_axis_position_across_moves_2(struct move **pm, int axis, double *pTime)
     struct move* m = *pm;
     double time = *pTime;
     while (likely(time < 0.)) {
-        m = list_prev_entry(m, node);
+        m = list_prev_entry_f(m);
         time += m->move_t;
     }
     while (likely(time > m->move_t)) {
         time -= m->move_t;
-        m = list_next_entry(m, node);
+        m = list_next_entry_f(m);
     }
     double result = get_axis_position(m, axis, time);
     *pm = m;
@@ -121,13 +121,13 @@ calc_position(struct move *m, int axis, double move_time
               , struct shaper_pulses *sp)
 {
     double res = 0.;
-    // struct move *zalupa = m;
-    // double zalupa_move_time = move_time;
+    struct move *zalupa = m;
+    double zalupa_move_time = move_time;
     int num_pulses = sp->num_pulses, i;
     for (i = 0; i < num_pulses; ++i) {
         double t = sp->pulses[i].t, a = sp->pulses[i].a;
-        // zalupa_move_time += t;
-        res += a * get_axis_position_across_moves(m, axis, move_time + t);
+        zalupa_move_time += t;
+        res += a * get_axis_position_across_moves_2(&zalupa, axis, &zalupa_move_time);
     }
     return res;
 }
