@@ -123,9 +123,9 @@ get_axis_position_across_moves(struct move *m, int axis, double time)
         m = list_next_entry_f(m);
         up++;
     }
-    char message[128];
-    sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
-    log_message(message);
+    // char message[128];
+    // sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
+    // log_message(message);
     return get_axis_position(m, axis, time);
 }
 
@@ -146,9 +146,9 @@ get_axis_position_across_moves_2(struct move **pm, int axis, double *pTime)
         m = list_next_entry_f(m);
         up++;
     }
-    char message[128];
-    sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
-    log_message(message);
+    // char message[128];
+    // sprintf(message, "get_axis_position: up %d, down %d\n", up, down);
+    // log_message(message);
     double result = get_axis_position(m, axis, time);
     *pm = m;
     *pTime = time;
