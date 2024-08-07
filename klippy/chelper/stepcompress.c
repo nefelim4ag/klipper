@@ -106,8 +106,8 @@ static struct step_move
 compress_bisect_add(struct stepcompress *sc)
 {
     uint32_t *qlast = sc->queue_next;
-    if (qlast > sc->queue_pos + 65535)
-        qlast = sc->queue_pos + 65535;
+    if (qlast > sc->queue_pos + 64)
+        qlast = sc->queue_pos + 64;
     struct points point = minmax_point(sc, sc->queue_pos);
     int32_t outer_mininterval = point.minp, outer_maxinterval = point.maxp;
     int32_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
