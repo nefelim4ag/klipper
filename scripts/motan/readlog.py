@@ -234,6 +234,110 @@ class HandleStepQ:
                 step_data.append((step_time, step_halfpos, step_pos))
 LogHandlers["stepq"] = HandleStepQ
 
+# Extract positions from queue_step raw log
+class HandleStepQueueRaw:
+    SubscriptionIdParts = 2
+    ParametersMin = 1
+    ParametersMax = 2
+    DataSets = [
+        ('stepqraw(<stepper>)', 'Commanded position of the given stepper'),
+        ('stepqraw(<stepper>,<time>)', 'Commanded position with smooth time'),
+    ]
+    def __init__(self, lmanager, name, name_parts):
+        self.name = name
+        self.stepper_name = name_parts[1]
+        self.jdispatch = lmanager.get_jdispatch()
+        self.step_data = [(0., 0., 0.), (0., 0., 0.)] # [(time, half_pos, pos)]
+        self.data_pos = 0
+        self.smooth_time = 0.010
+        self.last_start_pos = None
+        self.step_pos = 0
+        if len(name_parts) == 3:
+            try:
+                self.smooth_time = float(name_parts[2])
+            except ValueError:
+                raise error("Invalid stepq smooth time '%s'" % (name_parts[2],))
+    def get_label(self):
+        label = '%s raw position' % (self.stepper_name,)
+        return {'label': label, 'units': 'Position\n(mm)'}
+    def pull_data(self, req_time):
+        smooth_time = self.smooth_time
+        while 1:
+            data_pos = self.data_pos
+            step_data = self.step_data
+            # Find steps before and after req_time
+            next_time, next_halfpos, next_pos = step_data[data_pos + 1]
+            if req_time >= next_time:
+                if data_pos + 2 < len(step_data):
+                    self.data_pos = data_pos + 1
+                    continue
+                self._pull_block(req_time)
+                continue
+            last_time, last_halfpos, last_pos = step_data[data_pos]
+            # Perform step smoothing
+            rtdiff = req_time - last_time
+            stime = next_time - last_time
+            if stime <= smooth_time:
+                pdiff = next_halfpos - last_halfpos
+                return last_halfpos + rtdiff * pdiff / stime
+            stime = .5 * smooth_time
+            if rtdiff < stime:
+                pdiff = last_pos - last_halfpos
+                return last_halfpos + rtdiff * pdiff / stime
+            rtdiff = next_time - req_time
+            if rtdiff < stime:
+                pdiff = last_pos - next_halfpos
+                return next_halfpos + rtdiff * pdiff / stime
+            return last_pos
+    def _pull_block(self, req_time):
+        step_data = self.step_data
+        del step_data[:-1]
+        self.data_pos = 0
+        # Read data block containing requested time frame
+        while 1:
+            jmsg = self.jdispatch.pull_msg(req_time, self.name)
+            if jmsg is None:
+                last_time, last_halfpos, last_pos = step_data[0]
+                self.step_data.append((req_time + .1, last_pos, last_pos))
+                return
+            last_time = jmsg['last_step_time']
+            if req_time <= last_time:
+                break
+        # Process block into (time, half_position, position) 3-tuples
+        first_time = step_time = jmsg['first_step_time']
+        first_clock = jmsg['first_clock']
+        cdiff = jmsg['last_clock'] - first_clock
+        tdiff = last_time - first_time
+        inv_freq = 0.
+        if cdiff:
+            inv_freq = tdiff / cdiff
+        step_dist = jmsg['step_distance']
+        sdir = jmsg["sdir"]
+        if sdir == 0:
+            sdir = -1
+        # Start position only updated after quadric bisect
+        if self.last_start_pos is None or self.last_start_pos != jmsg['start_position']:
+            self.last_start_pos = jmsg['start_position']
+            self.step_pos = jmsg['start_position']
+        if not step_data[0][0]:
+            step_data[0] = (0., self.step_pos, self.step_pos)
+        first_clock_short = first_clock & 0xffffffff
+        jmsg["data"].pop(0)
+        for step_clock in jmsg['data']:
+            if step_clock == 0:
+                continue
+            # count = raw_count
+            # if count < 0:
+            #     qs_dist = -qs_dist
+            #     count = -count
+            # print(f"{first_time} + ({step_clock} - {first_clock_short}) * {inv_freq}")
+            step_time = first_time + ((step_clock - first_clock_short) & 0xffffffff) * inv_freq
+            # print(f"{first_time} + ({step_clock} - {first_clock_short}) * {inv_freq} = {step_time}")
+            step_halfpos = self.step_pos + .5 * step_dist
+            self.step_pos += step_dist * sdir
+            step_data.append((step_time, step_halfpos, self.step_pos))
+LogHandlers["stepqraw"] = HandleStepQueueRaw
+
 # Extract stepper motor phase position
 class HandleStepPhase:
     SubscriptionIdParts = 0

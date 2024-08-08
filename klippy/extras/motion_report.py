@@ -7,6 +7,46 @@ import logging
 import chelper
 from . import bulk_sensor
 
+# Extract raw queue steps
+class DumpStepperQueue:
+    def __init__(self, printer, mcu_stepper):
+        self.printer = printer
+        self.mcu_stepper = mcu_stepper
+        self.last_batch_clock = 0
+        self.batch_bulk = bulk_sensor.BatchBulkHelper(printer, self._process_batch)
+        api_resp = {'header': ('clock')}
+        self.batch_bulk.add_mux_endpoint("motion_report/dump_stepper_raw", "name",
+                                         mcu_stepper.get_name(), api_resp)
+    def get_step_queue(self, start_clock, end_clock):
+        mcu_stepper = self.mcu_stepper
+        return mcu_stepper.dump_raw_steps(start_clock, end_clock)
+    def _process_batch(self, eventtime):
+        data, count = self.get_step_queue(self.last_batch_clock, 1<<63)
+        if not data or not count:
+            return {}
+        clock_to_print_time = self.mcu_stepper.get_mcu().clock_to_print_time
+        self.last_batch_clock = last_clock = data.last_clock
+        first_clock = data.first_clock
+        first_time = clock_to_print_time(first_clock)
+        last_time = clock_to_print_time(last_clock)
+        mcu_pos = data.start_position
+        start_position = self.mcu_stepper.mcu_to_commanded_position(mcu_pos)
+        step_dist = self.mcu_stepper.get_step_dist()
+        d = []
+        i = 0
+        while i < count:
+            d.append(data.queue[i])
+            i += 1
+        return {
+                "data": d,
+                "start_position": start_position,
+                "start_mcu_position": mcu_pos,
+                "step_distance": step_dist,
+                "step_count": data.step_count,
+                "first_clock": first_clock, "first_step_time": first_time,
+                "last_clock": self.last_batch_clock, "last_step_time": last_time
+                }
+
 # Extract stepper queue_step messages
 class DumpStepper:
     def __init__(self, printer, mcu_stepper):
@@ -18,6 +58,7 @@ class DumpStepper:
         api_resp = {'header': ('interval', 'count', 'add')}
         self.batch_bulk.add_mux_endpoint("motion_report/dump_stepper", "name",
                                          mcu_stepper.get_name(), api_resp)
+        self.dump_raw = DumpStepperQueue(self.printer, mcu_stepper)
     def get_step_queue(self, start_clock, end_clock):
         mcu_stepper = self.mcu_stepper
         res = []
@@ -134,6 +175,7 @@ class PrinterMotionReport:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.steppers = {}
+        self.steppers_dummy = {}
         self.trapqs = {}
         # get_status information
         self.next_status_time = 0.
