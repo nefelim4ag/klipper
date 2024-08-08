@@ -150,6 +150,8 @@ class DataLogger:
         for stepper in motion_report.get("steppers", []):
             self.send_subscribe("stepq:" + stepper,
                                 "motion_report/dump_stepper", {"name": stepper})
+            self.send_subscribe("stepqraw:" + stepper,
+                                "motion_report/dump_stepper_raw", {"name": stepper})
             self.send_subscribe("stallguard:" + stepper,
                                 "tmc/stallguard_dump", {"name": stepper})
         # Subscribe to additional sensor data

@@ -36,6 +36,12 @@ defs_stepcompress = """
         int step_count, interval, add;
     };
 
+    struct pull_queue_raw {
+        uint64_t first_clock, last_clock;
+        int64_t start_position;
+        uint32_t queue[16 * 1024];
+    };
+
     struct stepcompress *stepcompress_alloc(uint32_t oid);
     void stepcompress_fill(struct stepcompress *sc, uint32_t max_error
         , int32_t queue_step_msgtag, int32_t set_next_step_dir_msgtag);
@@ -53,6 +59,9 @@ defs_stepcompress = """
         , uint32_t *data, int len);
     int stepcompress_extract_old(struct stepcompress *sc
         , struct pull_history_steps *p, int max
+        , uint64_t start_clock, uint64_t end_clock);
+    int stepcompress_extract_raw(struct stepcompress *sc
+        , struct pull_queue_raw *p
         , uint64_t start_clock, uint64_t end_clock);
 
     struct steppersync *steppersync_alloc(struct serialqueue *sq

@@ -62,6 +62,47 @@ class DumpStepper:
                 "first_clock": first_clock, "first_step_time": first_time,
                 "last_clock": last_clock, "last_step_time": last_time}
 
+# Extract raw queue steps
+class DumpStepperQueue:
+    def __init__(self, printer, mcu_stepper):
+        self.printer = printer
+        self.mcu_stepper = mcu_stepper
+        self.last_batch_clock = 0
+        self.batch_bulk = bulk_sensor.BatchBulkHelper(printer, self._process_batch)
+        api_resp = {'header': ('clock')}
+        self.batch_bulk.add_mux_endpoint("motion_report/dump_stepper_raw", "name",
+                                         mcu_stepper.get_name(), api_resp)
+    def get_step_queue(self, start_clock, end_clock):
+        mcu_stepper = self.mcu_stepper
+        data, count = mcu_stepper.dump_raw_steps(start_clock, end_clock)
+        return data, count
+    def _process_batch(self, eventtime):
+        data, count = self.get_step_queue(self.last_batch_clock, 1<<63)
+        if not data or not count:
+            return {}
+        clock_to_print_time = self.mcu_stepper.get_mcu().clock_to_print_time
+        self.last_batch_clock = data.last_clock
+        first_clock = data.first_clock
+        first_time = clock_to_print_time(first_clock)
+        last_time = clock_to_print_time(self.last_batch_clock)
+        mcu_pos = data.start_position
+        start_position = self.mcu_stepper.mcu_to_commanded_position(mcu_pos)
+        step_dist = self.mcu_stepper.get_step_dist()
+        d = []
+        i = 0
+        while i < count:
+            d.append(data.queue[i])
+            i += 1
+        return {
+                "data": d,
+                "start_position": start_position,
+                "start_mcu_position": mcu_pos,
+                "step_distance": step_dist,
+                "first_clock": first_clock, "first_step_time": first_time,
+                "last_clock": self.last_batch_clock, "last_step_time": last_time
+                }
+
+
 NEVER_TIME = 9999999999999999.
 
 # Extract trapezoidal motion queue (trapq)
@@ -134,6 +175,7 @@ class PrinterMotionReport:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.steppers = {}
+        self.steppers_dummy = {}
         self.trapqs = {}
         # get_status information
         self.next_status_time = 0.
@@ -149,6 +191,7 @@ class PrinterMotionReport:
     def register_stepper(self, config, mcu_stepper):
         ds = DumpStepper(self.printer, mcu_stepper)
         self.steppers[mcu_stepper.get_name()] = ds
+        self.steppers_dummy[mcu_stepper.get_name()] = DumpStepperQueue(self.printer, mcu_stepper)
     def _connect(self):
         # Lookup toolhead trapq
         toolhead = self.printer.lookup_object("toolhead")
