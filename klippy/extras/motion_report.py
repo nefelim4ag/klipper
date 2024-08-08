@@ -81,10 +81,10 @@ class DumpStepperQueue:
         if not data or not count:
             return {}
         clock_to_print_time = self.mcu_stepper.get_mcu().clock_to_print_time
-        self.last_batch_clock = data.last_clock
+        self.last_batch_clock = last_clock = data.last_clock
         first_clock = data.first_clock
         first_time = clock_to_print_time(first_clock)
-        last_time = clock_to_print_time(self.last_batch_clock)
+        last_time = clock_to_print_time(last_clock)
         mcu_pos = data.start_position
         start_position = self.mcu_stepper.mcu_to_commanded_position(mcu_pos)
         step_dist = self.mcu_stepper.get_step_dist()

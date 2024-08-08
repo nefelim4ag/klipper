@@ -673,6 +673,9 @@ stepcompress_extract_raw(struct stepcompress *sc, struct pull_queue_raw *p
     uint32_t queue_step_clock;
     int count = 0;
     p->start_position = sc->last_position;
+    if (queue_pos == NULL) {
+        return 0;
+    }
     // Init on first run dump
     if (start_clock == 0 || (sc->last_step_clock - start_clock) > UINT32_MAX) {
         start_clock = sc->last_step_clock;
