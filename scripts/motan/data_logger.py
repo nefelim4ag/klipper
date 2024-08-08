@@ -150,6 +150,8 @@ class DataLogger:
         for stepper in motion_report.get("steppers", []):
             self.send_subscribe("stepq:" + stepper,
                                 "motion_report/dump_stepper", {"name": stepper})
+            self.send_subscribe("stepqraw:" + stepper,
+                                "motion_report/dump_stepper_raw", {"name": stepper})
         # Subscribe to additional sensor data
         stypes = ["adxl345", "lis2dw", "mpu9250", "angle"]
         stypes = {st:st for st in stypes}

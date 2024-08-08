@@ -59,6 +59,8 @@ struct history_steps {
     uint64_t first_clock, last_clock;
     int64_t start_position;
     int step_count, interval, add;
+    uint16_t queue_size;
+    uint32_t queue[65535];
 };
 
 
@@ -369,6 +371,13 @@ add_move(struct stepcompress *sc, uint64_t first_clock, struct step_move *move)
     hs->interval = move->interval;
     hs->add = move->add;
     hs->step_count = sc->sdir ? move->count : -move->count;
+    uint32_t *queue_pos = sc->queue_pos;
+    hs->queue_size=0;
+    while( hs->queue_size < move->count && queue_pos < sc->queue_end) {
+        hs->queue[hs->queue_size] = *queue_pos;
+        hs->queue_size++;
+        queue_pos++;
+    }
     sc->last_position += hs->step_count;
     list_add_head(&hs->node, &sc->history_list);
 }
@@ -660,6 +669,29 @@ stepcompress_extract_old(struct stepcompress *sc, struct pull_history_steps *p
         p->add = hs->add;
         p++;
         res++;
+    }
+    return res;
+}
+
+// Return raw queue
+int __visible
+stepcompress_extract_raw(struct stepcompress *sc, struct pull_queue_raw *p
+                         , uint64_t start_clock, uint64_t end_clock)
+{
+    int res = 0;
+    struct history_steps *hs;
+    list_for_each_entry(hs, &sc->history_list, node) {
+        if (start_clock >= hs->last_clock)
+            break;
+        if (end_clock <= hs->first_clock)
+            continue;
+        p->first_clock = hs->first_clock;
+        p->last_clock = hs->last_clock;
+        p->start_position = hs->start_position;
+        p->step_count = hs->step_count;
+        res = hs->queue_size;
+        memcpy(p->queue, hs->queue, res * 4);
+        break;
     }
     return res;
 }

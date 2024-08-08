@@ -160,6 +160,12 @@ class MCU_stepper:
         count = ffi_lib.stepcompress_extract_old(self._stepqueue, data, count,
                                                  start_clock, end_clock)
         return (data, count)
+    def dump_raw_steps(self, start_clock, end_clock):
+        ffi_main, ffi_lib = chelper.get_ffi()
+        data = ffi_main.new('struct pull_queue_raw *')
+        count = ffi_lib.stepcompress_extract_raw(self._stepqueue, data,
+                                                 start_clock, end_clock)
+        return (data, count)
     def get_stepper_kinematics(self):
         return self._stepper_kinematics
     def set_stepper_kinematics(self, sk):
