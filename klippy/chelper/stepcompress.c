@@ -664,6 +664,44 @@ stepcompress_extract_old(struct stepcompress *sc, struct pull_history_steps *p
     return res;
 }
 
+// Return raw queue
+int __visible
+stepcompress_extract_raw(struct stepcompress *sc, struct pull_queue_raw *p
+                         , uint64_t start_clock, uint64_t end_clock)
+{
+    uint32_t *queue_pos = sc->queue_pos;
+    uint32_t queue_step_clock;
+    int count = 0;
+    p->start_position = sc->last_position;
+    p->sdir = sc->sdir;
+
+    if (queue_pos == NULL) {
+        return 0;
+    }
+    // Init on first run dump
+    if (start_clock == 0 || (sc->last_step_clock - start_clock) > UINT32_MAX) {
+        start_clock = sc->last_step_clock;
+        p->first_clock = sc->last_step_clock;
+    }
+    queue_step_clock = start_clock & 0xffffffff;
+
+    while(*queue_pos < queue_step_clock && queue_pos < sc->queue_end) {
+        queue_pos++;
+    }
+    while(count < 16 * 1024 && queue_pos < sc->queue_end) {
+        p->queue[count] = *queue_pos;
+        queue_pos++;
+        count++;
+    }
+    p->last_clock = start_clock;
+    if (count > 1) {
+        for (int i = 0; i < count-1; i++) {
+            p->last_clock += p->queue[i+1] - p->queue[i];
+        }
+    }
+    return count;
+}
+
 
 /****************************************************************
  * Step compress synchronization
