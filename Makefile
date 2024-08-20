@@ -30,7 +30,7 @@ cc-option=$(shell if test -z "`$(1) $(2) -S -o /dev/null -xc /dev/null 2>&1`" \
     ; then echo "$(2)"; else echo "$(3)"; fi ;)
 
 CFLAGS := -iquote $(OUT) -iquote src -iquote $(OUT)board-generic/ \
-		-std=gnu11 -O2 -MD -Wall \
+		-std=gnu11 -O2 -g -MD -Wall \
 		-Wold-style-definition $(call cc-option,$(CC),-Wtype-limits,) \
     -ffunction-sections -fdata-sections -fno-delete-null-pointer-checks
 CFLAGS += -flto=auto -fwhole-program -fno-use-linker-plugin -ggdb3

@@ -77,6 +77,8 @@ stepper_load_next(struct stepper *s)
     s->interval = m->interval + m->add;
     if (HAVE_SINGLE_SCHEDULE && s->flags & SF_SINGLE_SCHED) {
         s->time.waketime += m->interval;
+        if (CONFIG_CLOCK_FREQ > 400000000)
+            s->next_step_time += m->interval;
         if (HAVE_AVR_OPTIMIZATION)
             s->flags = m->add ? s->flags|SF_HAVE_ADD : s->flags & ~SF_HAVE_ADD;
         s->count = m->count;
@@ -99,7 +101,7 @@ stepper_load_next(struct stepper *s)
     return SF_RESCHEDULE;
 }
 
-// Optimized step function to step on each step pin edge
+// UnOptimized step function to step on each step pin edge
 uint_fast8_t
 stepper_event_edge(struct timer *t)
 {
@@ -108,8 +110,22 @@ stepper_event_edge(struct timer *t)
     uint32_t count = s->count - 1;
     if (likely(count)) {
         s->count = count;
-        s->time.waketime += s->interval;
         s->interval += s->add;
+        if (CONFIG_CLOCK_FREQ <= 300000000) {
+            s->time.waketime += s->interval;
+            return SF_RESCHEDULE;
+        } else {
+            uint32_t curtime = timer_read_time();
+            uint32_t min_next_time = curtime + s->step_pulse_ticks;
+            s->next_step_time += s->interval;
+            if (unlikely(timer_is_before(s->next_step_time, min_next_time))) {
+                // The next step event is too close - push it back
+                s->time.waketime = min_next_time;
+                return SF_RESCHEDULE;
+            }
+            s->time.waketime = s->next_step_time;
+            return SF_RESCHEDULE;
+        }
         return SF_RESCHEDULE;
     }
     return stepper_load_next(s);
