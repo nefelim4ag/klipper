@@ -3,6 +3,7 @@
 # Copyright (C) 2016-2020  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+import math, random
 import os, logging, threading
 
 
@@ -45,7 +46,10 @@ class Heater:
         self.next_pwm_time = 0.
         self.last_pwm_value = 0.
         # Setup control algorithm sub-class
-        algos = {'watermark': ControlBangBang, 'pid': ControlPID}
+        algos = {
+            'watermark': ControlBangBang,
+            'pid': ControlPID,
+            'neural': RNNHeaterControl}
         algo = config.getchoice('control', algos)
         self.control = algo(self, config)
         # Setup output heater pin
@@ -224,6 +228,169 @@ class ControlPID:
         temp_diff = target_temp - smoothed_temp
         return (abs(temp_diff) > PID_SETTLE_DELTA
                 or abs(self.prev_temp_deriv) > PID_SETTLE_SLOPE)
+
+######################################################################
+# DNN Control
+######################################################################
+
+class RNN:
+    def __init__(self, input_size, hidden_size, output_size, learning_rate=0.01):
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        self.learning_rate = learning_rate
+
+        # Initialize weights and biases
+        self.wx = [[random.uniform(-0.5, 0.5) for _ in range(hidden_size)] for _ in range(input_size)]
+        self.wh = [[random.uniform(-0.5, 0.5) for _ in range(hidden_size)] for _ in range(hidden_size)]
+        self.wy = [[random.uniform(-0.5, 0.5) for _ in range(output_size)] for _ in range(hidden_size)]
+
+        self.bh = [random.uniform(-0.5, 0.5) for _ in range(hidden_size)]
+        self.by = [random.uniform(-0.5, 0.5) for _ in range(output_size)]
+
+        self.h = [0.0 for _ in range(hidden_size)]
+
+    def sigmoid(self, x):
+        return 1 / (1 + math.exp(-x))
+
+    def tanh(self, x):
+        return math.tanh(x)
+
+    def forward(self, x):
+        # Update hidden state
+        new_h = [0.0 for _ in range(self.hidden_size)]
+        for i in range(self.hidden_size):
+            sum_wx = sum(self.wx[j][i] * x[j] for j in range(self.input_size))
+            sum_wh = sum(self.wh[j][i] * self.h[j] for j in range(self.hidden_size))
+            new_h[i] = self.tanh(sum_wx + sum_wh + self.bh[i])
+        self.h = new_h
+
+        # Compute output
+        y = [0.0 for _ in range(self.output_size)]
+        for i in range(self.output_size):
+            y[i] = self.sigmoid(sum(self.wy[j][i] * self.h[j] for j in range(self.hidden_size)) + self.by[i])
+
+        return y
+
+    def backpropagate(self, x, y, target):
+        # Compute output error
+        output_error = [target[i] - y[i] for i in range(self.output_size)]
+
+        # Backpropagate through time (for simplicity, we'll only go back one step)
+        dwy = [[0.0 for _ in range(self.output_size)] for _ in range(self.hidden_size)]
+        dby = [0.0 for _ in range(self.output_size)]
+        dh = [0.0 for _ in range(self.hidden_size)]
+
+        for i in range(self.output_size):
+            dby[i] = output_error[i] * y[i] * (1 - y[i])
+            for j in range(self.hidden_size):
+                dwy[j][i] = dby[i] * self.h[j]
+                dh[j] += dby[i] * self.wy[j][i]
+
+        dwx = [[0.0 for _ in range(self.hidden_size)] for _ in range(self.input_size)]
+        dwh = [[0.0 for _ in range(self.hidden_size)] for _ in range(self.hidden_size)]
+        dbh = [0.0 for _ in range(self.hidden_size)]
+
+        for i in range(self.hidden_size):
+            temp = dh[i] * (1 - self.h[i]**2)
+            dbh[i] = temp
+            for j in range(self.input_size):
+                dwx[j][i] = temp * x[j]
+            for j in range(self.hidden_size):
+                dwh[j][i] = temp * self.h[j]
+
+        # Update weights and biases
+        for i in range(self.input_size):
+            for j in range(self.hidden_size):
+                self.wx[i][j] += self.learning_rate * dwx[i][j]
+
+        for i in range(self.hidden_size):
+            for j in range(self.hidden_size):
+                self.wh[i][j] += self.learning_rate * dwh[i][j]
+            for j in range(self.output_size):
+                self.wy[i][j] += self.learning_rate * dwy[i][j]
+
+        for i in range(self.hidden_size):
+            self.bh[i] += self.learning_rate * dbh[i]
+
+        for i in range(self.output_size):
+            self.by[i] += self.learning_rate * dby[i]
+
+class RNNHeaterControl:
+    def __init__(self, heater, config):
+        self.rnn = RNN(input_size=4, hidden_size=16, output_size=1, learning_rate=0.01)
+        self.heater = heater
+        self.heater_max_power = heater.get_max_power()
+        self.prev_temp = 25.0
+        self.prev_time = 0.0
+        self.output_pwm = 0.0
+
+    # Normalize temp to [0, 1]
+    def temp_normalize(self, temp):
+        return (temp + self.heater.min_temp) / (self.heater.min_temp + self.heater.max_temp)
+
+    def temperature_update(self, read_time, temp, target_temp):
+        time_delta = read_time - self.prev_time
+        temp_delta = (temp - self.prev_temp) / time_delta
+        # normalize inputs
+        time_delta = max(time_delta, 1.0)
+        temp_delta_normalized = max(temp_delta + 5, 10) / 10
+
+        # Normalize inputs
+        normalized_inputs = [
+            self.temp_normalize(temp),
+            self.temp_normalize(target_temp),
+            time_delta,
+            temp_delta_normalized
+        ]
+
+        # Forward pass through the RNN
+        output = self.rnn.forward(normalized_inputs)
+        predicted_pwm = output[0]
+
+        # Apply the predicted PWM
+        self.output_pwm = max(0.0, min(self.heater_max_power, predicted_pwm))
+        self.heater.set_pwm(read_time, self.output_pwm)
+
+        # Calculate expected PWM for training
+        expected_pwm = self.calculate_expected_pwm(temp, target_temp, temp_delta)
+
+        # Train the RNN
+        self.rnn.backpropagate(normalized_inputs, output, [expected_pwm])
+
+        self.prev_temp = temp
+        self.prev_time = read_time
+
+    # Guide network with PWM
+    def calculate_expected_pwm(self, temp, target_temp, temp_delta):
+        temp_error = target_temp - temp
+        predicted_temp = temp + temp_delta * 2
+
+        if temp_error > 0.2:
+            if temp_error > 5.0:
+                return 1.0
+            if predicted_temp < target_temp:
+                return self.output_pwm + 0.01
+            if temp_error > 0.3:
+                return min(1.0, self.output_pwm + 0.01)
+            if temp_delta > 0.05:
+                return self.output_pwm
+        if temp_error < -0.2:
+            if temp_error < -5.0:
+                return .0
+            if predicted_temp > target_temp:
+                return self.output_pwm - 0.01
+            if temp_error < -0.3:
+                return max(0.0, self.output_pwm - 0.01)
+            if temp_delta < -0.05:
+                return self.output_pwm
+
+        return self.output_pwm
+
+    def check_busy(self, eventtime, smoothed_temp, target_temp):
+        temp_diff = abs(target_temp - smoothed_temp)
+        return temp_diff > 1.0
+
 
 
 ######################################################################
