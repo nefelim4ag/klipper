@@ -150,6 +150,7 @@ class LDC1612:
             return 0.
         params = self.query_ldc1612_home_state_cmd.send([self.oid])
         tclock = self.mcu.clock32_to_clock64(params['trigger_clock'])
+        self.set_reg(REG_CONFIG, 0x001 | (1<<13))
         return self.mcu.clock_to_print_time(tclock)
     # Measurement decoding
     def _convert_samples(self, samples):
@@ -194,6 +195,7 @@ class LDC1612:
         # Halt bulk reading
         self.query_ldc1612_cmd.send_wait_ack([self.oid, 0])
         self.ffreader.note_end()
+        self.set_reg(REG_CONFIG, 0x001 | (1<<13))
         logging.info("LDC1612 finished '%s' measurements", self.name)
     def _process_batch(self, eventtime):
         samples = self.ffreader.pull_samples()
