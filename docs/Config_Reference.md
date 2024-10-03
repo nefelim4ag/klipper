@@ -813,6 +813,10 @@ sensor_type:
 sensor_pin:
 #   Analog input pin connected to the sensor. This parameter must be
 #   provided.
+#sensor_interval: 0.3
+#   Sensor query interval.
+#   Decreasing this value can insignificantly improve temp stability.
+#   Default is 0.3s.
 #pullup_resistor: 4700
 #   The resistance (in ohms) of the pullup attached to the thermistor.
 #   This parameter is only valid when the sensor is a thermistor. The
