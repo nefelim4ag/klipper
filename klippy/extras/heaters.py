@@ -26,7 +26,9 @@ class Heater:
         self.max_temp = config.getfloat('max_temp', above=self.min_temp)
         self.sensor.setup_minmax(self.min_temp, self.max_temp)
         self.sensor.setup_callback(self.temperature_callback)
-        self.pwm_delay = self.sensor.get_report_time_delta()
+        report_time = self.sensor.get_report_time_delta()
+        self.pwm_delay = config.getfloat('pwm_delay', report_time,
+                                         minval=0.05, maxval=0.3)
         # Setup temperature checks
         self.min_extrude_temp = config.getfloat(
             'min_extrude_temp', 170.,
