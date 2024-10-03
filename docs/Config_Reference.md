@@ -850,6 +850,12 @@ pid_Kd:
 #   not recommended to set this unless there is an electrical
 #   requirement to switch the heater faster than 10 times a second.
 #   The default is 0.100 seconds.
+#fan: fan
+#   Name of the part cooling fan. Default is empty
+#fan_power_loss: .0
+#   Because of PID reactivity, the cooling fan can cool hotend too much.
+#   This value is the PWM percentage to accommodate those losses.
+#   Default is 0.
 #min_extrude_temp: 170
 #   The minimum temperature (in Celsius) at which extruder move
 #   commands may be issued. The default is 170 Celsius.
