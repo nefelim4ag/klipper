@@ -72,6 +72,8 @@ class Fan:
         self.gcrq.queue_gcode_request(value)
     def _handle_request_restart(self, print_time):
         self.set_speed(0., print_time)
+    def get_fan_power(self):
+        return self.last_fan_value
 
     def get_status(self, eventtime):
         tachometer_status = self.tachometer.get_status(eventtime)
