@@ -183,6 +183,14 @@ PID_SETTLE_SLOPE = .1
 class ControlPID:
     def __init__(self, heater, config):
         self.heater = heater
+        self.printer = config.get_printer()
+        self.fan_name = config.get("fan", None)
+        self.fan = None
+        if self.fan_name:
+            self.printer.load_object(config, self.fan_name)
+            self.fan = self.printer.lookup_object(self.fan_name)
+        self.fan_pwm_loss = config.getfloat('fan_power_loss', .0,
+                                            minval=.0, maxval=0.5)
         self.heater_max_power = heater.get_max_power()
         self.Kp = config.getfloat('pid_Kp') / PID_PARAM_BASE
         self.Ki = config.getfloat('pid_Ki') / PID_PARAM_BASE
@@ -212,6 +220,8 @@ class ControlPID:
         co = self.Kp*temp_err + self.Ki*temp_integ - self.Kd*temp_deriv
         #logging.debug("pid: %f@%.3f -> diff=%f deriv=%f err=%f integ=%f co=%d",
         #    temp, read_time, temp_diff, temp_deriv, temp_err, temp_integ, co)
+        if self.fan and self.fan.fan.get_fan_power() > 0:
+            co = co + self.fan.fan.get_fan_power() * self.fan_pwm_loss
         bounded_co = max(0., min(self.heater_max_power, co))
         self.heater.set_pwm(read_time, bounded_co)
         # Store state for next measurement
