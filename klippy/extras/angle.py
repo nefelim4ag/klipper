@@ -457,6 +457,56 @@ class HelperMT6816:
         gcmd.respond_info("No Mag: %i" % (val >> 1 & 0x1))
         gcmd.respond_info("Parity: %i == %i" % (parity, val & 0x1))
 
+class HelperMT6826S:
+    SPI_MODE = 3
+    SPI_SPEED = 4000000
+    def __init__(self, config, spi, oid):
+        self.printer = config.get_printer()
+        self.spi = spi
+        self.oid = oid
+        self.mcu = spi.get_mcu()
+        self.mcu.register_config_callback(self._build_config)
+        self.spi_angle_transfer_cmd = None
+        self.is_tcode_absolute = False
+        self.last_temperature = None
+        name = config.get_name().split()[-1]
+        gcode = self.printer.lookup_object("gcode")
+        gcode.register_mux_command("ANGLE_DEBUG_READ", "CHIP", name,
+                                   self.cmd_ANGLE_DEBUG_READ,
+                                   desc=self.cmd_ANGLE_DEBUG_READ_help)
+    def _build_config(self):
+        cmdqueue = self.spi.get_command_queue()
+        self.spi_angle_transfer_cmd = self.mcu.lookup_query_command(
+            "spi_angle_transfer oid=%c data=%*s",
+            "spi_angle_transfer_response oid=%c clock=%u response=%*s",
+            oid=self.oid, cq=cmdqueue)
+    def _send_spi(self, msg):
+        for retry in range(5):
+            params = self.spi.spi_transfer(msg)
+            return params
+    def get_static_delay(self):
+        return .00001
+    def _read_reg(self, reg):
+        reg = 0x3000 | reg
+        msg = [reg >> 8, reg & 0xff, 0, 0, 0, 0]
+        params = self._send_spi(msg)
+        resp = bytearray(params['response'])
+        angle = (resp[2] << 7) | (resp[3] >> 1)
+        status = resp[4]
+        crc = resp[5]
+        return angle, status, crc
+    def start(self):
+        pass
+    cmd_ANGLE_DEBUG_READ_help = "Query low-level angle sensor register"
+    def cmd_ANGLE_DEBUG_READ(self, gcmd):
+        reg = 0x003
+        angle, status, crc = self._read_reg(reg)
+        gcmd.respond_info("ANGLE REG[0x003] = 0x%02x" % (angle >> 7))
+        gcmd.respond_info("ANGLE REG[0x004] = 0x%02x" % ((angle << 1) & 0xff))
+        gcmd.respond_info("Angle %i ~ %.2f" % (angle, angle * 360 / (1 << 15)))
+        gcmd.respond_info("Weak Mag: %i" % (status >> 1 & 0x1))
+        gcmd.respond_info("Under Voltage: %i" % (status >> 2 & 0x1))
+
 BYTES_PER_SAMPLE = 3
 SAMPLES_PER_BLOCK = bulk_sensor.MAX_BULK_MSG_SIZE // BYTES_PER_SAMPLE
 
@@ -474,7 +524,8 @@ class Angle:
         self.last_sequence = self.last_angle = 0
         # Sensor type
         sensors = { "a1333": HelperA1333, "as5047d": HelperAS5047D,
-                    "tle5012b": HelperTLE5012B, "mt6816": HelperMT6816 }
+                    "tle5012b": HelperTLE5012B, "mt6816": HelperMT6816,
+                    "mt6826s": HelperMT6826S }
         sensor_type = config.getchoice('sensor_type', {s: s for s in sensors})
         sensor_class = sensors[sensor_type]
         self.spi = bus.MCU_SPI_from_config(config, sensor_class.SPI_MODE,
