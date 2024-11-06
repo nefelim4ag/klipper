@@ -474,6 +474,15 @@ class HelperMT6826S:
         gcode.register_mux_command("ANGLE_DEBUG_READ", "CHIP", name,
                                    self.cmd_ANGLE_DEBUG_READ,
                                    desc=self.cmd_ANGLE_DEBUG_READ_help)
+        gcode.register_mux_command("ANGLE_CHIP_CALIBRATION", "CHIP", name,
+                                   self.cmd_ANGLE_DEBUG_READ,
+                                   desc=self.cmd_ANGLE_DEBUG_READ_help)
+        self.calibration = {
+            0: "No Calibration",
+            1: "Running Calibration",
+            2: "Calibration Failed",
+            3: "Calibration Successful"
+        }
     def _build_config(self):
         cmdqueue = self.spi.get_command_queue()
         self.spi_angle_transfer_cmd = self.mcu.lookup_query_command(
@@ -488,6 +497,12 @@ class HelperMT6826S:
         return .00001
     def _read_reg(self, reg):
         reg = 0x3000 | reg
+        msg = [reg >> 8, reg & 0xff, 0]
+        params = self._send_spi(msg)
+        resp = bytearray(params['response'])
+        return resp[2]
+    def _read_angle(self, reg):
+        reg = 0x3000 | reg
         msg = [reg >> 8, reg & 0xff, 0, 0, 0, 0]
         params = self._send_spi(msg)
         resp = bytearray(params['response'])
@@ -497,8 +512,8 @@ class HelperMT6826S:
         return angle, status, crc
     def start(self):
         pass
-    cmd_ANGLE_DEBUG_READ_help = "Query low-level angle sensor register"
-    def cmd_ANGLE_DEBUG_READ(self, gcmd):
+    cmd_ANGLE_CHIP_CALIBRATION_help = "Run MT6826s calibration sequence"
+    def cmd_ANGLE_CHIP_CALIBRATION(self, gcmd):
         reg = 0x003
         angle, status, crc = self._read_reg(reg)
         gcmd.respond_info("ANGLE REG[0x003] = 0x%02x" % (angle >> 7))
@@ -506,6 +521,27 @@ class HelperMT6826S:
         gcmd.respond_info("Angle %i ~ %.2f" % (angle, angle * 360 / (1 << 15)))
         gcmd.respond_info("Weak Mag: %i" % (status >> 1 & 0x1))
         gcmd.respond_info("Under Voltage: %i" % (status >> 2 & 0x1))
+    cmd_ANGLE_DEBUG_READ_help = "Query low-level angle sensor register"
+    def cmd_ANGLE_DEBUG_READ(self, gcmd):
+        reg = gcmd.get("REG", minval=0, maxval=0x155, parser=lambda x: int(x, 0))
+        if reg == 0x003:
+            angle, status, crc = self._read_angle(reg)
+            gcmd.respond_info("ANGLE REG[0x003] = 0x%02x" % (angle >> 7))
+            gcmd.respond_info("ANGLE REG[0x004] = 0x%02x" % ((angle << 1) & 0xff))
+            gcmd.respond_info("Angle %i ~ %.2f" % (angle, angle * 360 / (1 << 15)))
+            gcmd.respond_info("Weak Mag: %i" % (status >> 1 & 0x1))
+            gcmd.respond_info("Under Voltage: %i" % (status >> 2 & 0x1))
+        elif reg == 0x00e:
+            val = self._read_reg(reg)
+            gcmd.respond_info("GPIO_DS = %i" % (val >> 7))
+            gcmd.respond_info("AUTOCAL_FREQ = %i" % (val >> 4 & 0x7))
+            gcmd.respond_info("MagnTek = 0x%02x" % (val & 0x7))
+        elif reg == 0x113:
+            val = self._read_reg(reg)
+            gcmd.respond_info("Status: %s" % (self.calibration[val >> 6]))
+        else:
+            val = self._read_reg(reg)
+            gcmd.respond_info("REG[0x%04x] = 0x%02x" % (reg, val))
 
 BYTES_PER_SAMPLE = 3
 SAMPLES_PER_BLOCK = bulk_sensor.MAX_BULK_MSG_SIZE // BYTES_PER_SAMPLE
