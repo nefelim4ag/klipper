@@ -462,6 +462,7 @@ class HelperMT6826S:
     SPI_SPEED = 4000000
     def __init__(self, config, spi, oid):
         self.printer = config.get_printer()
+        self.stepper_name = config.get('stepper', None)
         self.spi = spi
         self.oid = oid
         self.mcu = spi.get_mcu()
@@ -475,8 +476,8 @@ class HelperMT6826S:
                                    self.cmd_ANGLE_DEBUG_READ,
                                    desc=self.cmd_ANGLE_DEBUG_READ_help)
         gcode.register_mux_command("ANGLE_CHIP_CALIBRATION", "CHIP", name,
-                                   self.cmd_ANGLE_DEBUG_READ,
-                                   desc=self.cmd_ANGLE_DEBUG_READ_help)
+                                   self.cmd_ANGLE_CHIP_CALIBRATION,
+                                   desc=self.cmd_ANGLE_CHIP_CALIBRATION_help)
         self.calibration = {
             0: "No Calibration",
             1: "Running Calibration",
@@ -501,6 +502,10 @@ class HelperMT6826S:
         params = self._send_spi(msg)
         resp = bytearray(params['response'])
         return resp[2]
+    def _write_reg(self, reg, data):
+        reg = 0x6000 | reg
+        msg = [reg >> 8, reg & 0xff, data]
+        self._send_spi(msg)
     def _read_angle(self, reg):
         reg = 0x3000 | reg
         msg = [reg >> 8, reg & 0xff, 0, 0, 0, 0]
@@ -512,15 +517,54 @@ class HelperMT6826S:
         return angle, status, crc
     def start(self):
         pass
+    def get_microsteps(self):
+        configfile = self.printer.lookup_object('configfile')
+        sconfig = configfile.get_status(None)['settings']
+        stconfig = sconfig.get(self.stepper_name, {})
+        microsteps = stconfig['microsteps']
+        full_steps = stconfig['full_steps_per_rotation']
+        return microsteps, full_steps
     cmd_ANGLE_CHIP_CALIBRATION_help = "Run MT6826s calibration sequence"
     def cmd_ANGLE_CHIP_CALIBRATION(self, gcmd):
-        reg = 0x003
-        angle, status, crc = self._read_reg(reg)
-        gcmd.respond_info("ANGLE REG[0x003] = 0x%02x" % (angle >> 7))
-        gcmd.respond_info("ANGLE REG[0x004] = 0x%02x" % ((angle << 1) & 0xff))
-        gcmd.respond_info("Angle %i ~ %.2f" % (angle, angle * 360 / (1 << 15)))
-        gcmd.respond_info("Weak Mag: %i" % (status >> 1 & 0x1))
-        gcmd.respond_info("Under Voltage: %i" % (status >> 2 & 0x1))
+        fmove = self.printer.lookup_object('force_move')
+        mcu_stepper = fmove.lookup_stepper(self.stepper_name)
+        if self.stepper_name is None:
+            gcmd.respond_info("stepper not defined")
+            return
+
+        gcmd.respond_info("MT6826S Run calibration sequence")
+        gcmd.respond_info("Motor will do 18+ rotations - ensure pulley is disconnected")
+        req_freq = self._read_reg(0x00e) >> 4 & 0x7
+        # Minimal calibration speed
+        rpm = (3200 >> req_freq) + 1
+        rps = rpm / 60
+        move = fmove.manual_move
+        # Move stepper several turns (to allow internal sensor calibration)
+        microsteps, full_steps = self.get_microsteps()
+        step_dist = mcu_stepper.get_step_dist()
+        full_step_dist = step_dist * microsteps
+        rotation_dist = full_steps * full_step_dist
+        move(mcu_stepper, 2 * rotation_dist, rps * rotation_dist)
+        self._write_reg(0x155, 0x5e)
+        move(mcu_stepper, 20 * rotation_dist, rps * rotation_dist)
+        val = self._read_reg(0x113)
+        code = val >> 6
+        gcmd.respond_info("Status: %s" % (self.calibration[code]))
+        while code == 1:
+            move(mcu_stepper, 5 * rotation_dist, rps * rotation_dist)
+            val = self._read_reg(0x113)
+            code = val >> 6
+            gcmd.respond_info("Status: %s" % (self.calibration[code]))
+
+        if code == 2:
+            gcmd.respond_info("Calibration failed, something is really wrong")
+        if code == 3:
+            gcmd.respond_info("Calibration success, please poweroff sensor")
+
+        # Move to each full step position
+        toolhead = self.printer.lookup_object('toolhead')
+        toolhead.wait_moves()
+
     cmd_ANGLE_DEBUG_READ_help = "Query low-level angle sensor register"
     def cmd_ANGLE_DEBUG_READ(self, gcmd):
         reg = gcmd.get("REG", minval=0, maxval=0x155, parser=lambda x: int(x, 0))
