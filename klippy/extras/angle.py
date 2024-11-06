@@ -506,6 +506,18 @@ class HelperMT6826S:
         reg = 0x6000 | reg
         msg = [reg >> 8, reg & 0xff, data]
         self._send_spi(msg)
+    def crc8(self, data):
+        polynomial = 0x07
+        crc = 0x00
+        for byte in data:
+            crc ^= byte
+            for _ in range(8):
+                if crc & 0x80:
+                    crc = (crc << 1) ^ polynomial
+                else:
+                    crc <<= 1
+                crc &= 0xFF
+        return crc
     def _read_angle(self, reg):
         reg = 0x3000 | reg
         msg = [reg >> 8, reg & 0xff, 0, 0, 0, 0]
@@ -513,8 +525,9 @@ class HelperMT6826S:
         resp = bytearray(params['response'])
         angle = (resp[2] << 7) | (resp[3] >> 1)
         status = resp[4]
+        crc_computed = self.crc8([resp[2], resp[3], resp[4]])
         crc = resp[5]
-        return angle, status, crc
+        return angle, status, crc, crc_computed
     def start(self):
         pass
     def get_microsteps(self):
@@ -564,17 +577,17 @@ class HelperMT6826S:
         # Move to each full step position
         toolhead = self.printer.lookup_object('toolhead')
         toolhead.wait_moves()
-
     cmd_ANGLE_DEBUG_READ_help = "Query low-level angle sensor register"
     def cmd_ANGLE_DEBUG_READ(self, gcmd):
         reg = gcmd.get("REG", minval=0, maxval=0x155, parser=lambda x: int(x, 0))
         if reg == 0x003:
-            angle, status, crc = self._read_angle(reg)
+            angle, status, crc1, crc2 = self._read_angle(reg)
             gcmd.respond_info("ANGLE REG[0x003] = 0x%02x" % (angle >> 7))
             gcmd.respond_info("ANGLE REG[0x004] = 0x%02x" % ((angle << 1) & 0xff))
             gcmd.respond_info("Angle %i ~ %.2f" % (angle, angle * 360 / (1 << 15)))
             gcmd.respond_info("Weak Mag: %i" % (status >> 1 & 0x1))
             gcmd.respond_info("Under Voltage: %i" % (status >> 2 & 0x1))
+            gcmd.respond_info("CRC: 0x%02x == 0x%02x" % (crc1, crc2))
         elif reg == 0x00e:
             val = self._read_reg(reg)
             gcmd.respond_info("GPIO_DS = %i" % (val >> 7))
