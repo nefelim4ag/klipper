@@ -529,7 +529,9 @@ class HelperMT6826S:
         crc = resp[5]
         return angle, status, crc, crc_computed
     def start(self):
-        pass
+        val = self._read_reg(0x00d)
+        # Set histeresis to 0.003 degree
+        self._write_reg(0x00d, (val & 0xf8) | 0x5)
     def get_microsteps(self):
         configfile = self.printer.lookup_object('configfile')
         sconfig = configfile.get_status(None)['settings']
