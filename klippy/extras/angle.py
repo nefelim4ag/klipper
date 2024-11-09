@@ -413,7 +413,7 @@ class HelperTLE5012B:
 
 class HelperMT6816:
     SPI_MODE = 3
-    SPI_SPEED = 4000000
+    SPI_SPEED = 10000000
     def __init__(self, config, spi, oid):
         self.printer = config.get_printer()
         self.spi = spi
