@@ -264,6 +264,646 @@ class AngleCalibration:
         configfile.remove_section(self.name)
         configfile.set(self.name, 'calibrate', ''.join(cal_contents))
 
+class AngleTMCCalibration:
+    def __init__(self, config):
+        self.printer = config.get_printer()
+        self.name = config.get_name()
+        self.stepper_name = config.get('stepper', None)
+        if self.stepper_name is None:
+            # No calibration
+            return
+        sconfig = config.getsection(self.stepper_name)
+        sconfig.getint('microsteps', note_valid=False)
+        self.tmc = self.mcu_stepper = None
+        self.driver_name = None
+        self.mcu = None
+        self.reactor = self.printer.get_reactor()
+        self.msgs = []
+        self.is_finished = True
+        self.dir = 0
+        self.return_offset = 0
+        self.microsteps = 0
+        self.full_steps = 0
+        self.step_dist = 0
+        self.full_step_dist = 0
+        self.mscnt = 0
+
+        # Register commands
+        self.printer.register_event_handler("klippy:connect", self.connect)
+        cname = self.name.split()[-1]
+        gcode = self.printer.lookup_object('gcode')
+        gcode.register_mux_command("ANGLE_TMC_CALIBRATE", "CHIP",
+                                   cname, self.cmd_ANGLE_TMC_CALIBRATE,
+                                   desc=self.cmd_ANGLE_TMC_CALIBRATE_help)
+        gcode.register_mux_command("ANGLE_TMC_MSLUT_DUMP", "CHIP",
+                                   cname, self.cmd_ANGLE_TMC_MSLUT_DUMP,
+                                   desc=self.cmd_ANGLE_TMC_MSLUT_DUMP_help)
+    def lookup_tmc(self):
+        for driver in TRINAMIC_DRIVERS:
+            self.driver_name = "%s %s" % (driver, self.stepper_name)
+            module = self.printer.lookup_object(self.driver_name, None)
+            if module is not None:
+                return module
+        raise self.printer.command_error("Unable to find TMC driver for %s"
+                                         % (self.stepper_name,))
+    def connect(self):
+        tmc_module = self.lookup_tmc()
+        self.tmc = tmc_module.mcu_tmc
+        fmove = self.printer.lookup_object('force_move')
+        self.mcu_stepper = fmove.lookup_stepper(self.stepper_name)
+        configfile = self.printer.lookup_object('configfile')
+        sconfig = configfile.get_status(None)['settings']
+        stconfig = sconfig.get(self.stepper_name, {})
+        self.microsteps = stconfig['microsteps']
+        self.full_steps = stconfig['full_steps_per_rotation']
+        self.step_dist = self.mcu_stepper.get_step_dist()
+        self.full_step_dist = self.step_dist * self.microsteps
+        self.mscnt_quant = 256 // self.microsteps
+        self.mscnt_min = (self.mscnt_quant // 2)
+
+    def mslut_decoder(self):
+        MSLUTS = [
+            self.tmc.fields.get_field("mslut0"),
+            self.tmc.fields.get_field("mslut1"),
+            self.tmc.fields.get_field("mslut2"),
+            self.tmc.fields.get_field("mslut3"),
+            self.tmc.fields.get_field("mslut4"),
+            self.tmc.fields.get_field("mslut5"),
+            self.tmc.fields.get_field("mslut6"),
+            self.tmc.fields.get_field("mslut7"),
+        ]
+        bit_diffs = []
+        for mslut in MSLUTS:
+            for shift in range(0, 32):
+                bit_val = (mslut >> shift) & 1
+                bit_diffs.append(bit_val)
+
+        decoded_val = []
+
+        # Width control bit coding W0…W3:
+        # %00: MSLUT entry 0, 1 select: -1, +0
+        # %01: MSLUT entry 0, 1 select: +0, +1
+        # %10: MSLUT entry 0, 1 select: +1, +2
+        # %11: MSLUT entry 0, 1 select: +2, +3
+        W = {
+            0: self.tmc.fields.get_field("w0"),
+            1: self.tmc.fields.get_field("w1"),
+            2: self.tmc.fields.get_field("w2"),
+            3: self.tmc.fields.get_field("w3")
+        }
+        # Unused, just for inmind decoding
+        # _W_lookup_table = {0: {-1, 0}, 1: {0, +1}, 2: {1, 2}, 3: {2, 3}}
+        # _W_Fast_offset_table = {0: -1, 1: 0, 2: 1, 3: 2}
+        # offset = W - 1
+
+        # The sine wave look-up table can be divided into up to
+        # four segments using an individual step width control
+        # entry Wx. The segment borders are selected by X1, X2
+        # and X3.
+        # Segment 0 goes from 0 to X1-1.
+        # Segment 1 goes from X1 to X2-1.
+        # Segment 2 goes from X2 to X3-1.
+        # Segment 3 goes from X3 to 255.
+        # For defined response the values shall satisfy:
+        # 0<X1<X2<X3
+        X = {
+            1: self.tmc.fields.get_field("x1"),
+            2: self.tmc.fields.get_field("x2"),
+            3: self.tmc.fields.get_field("x3"),
+        }
+        START_SIN = self.tmc.fields.get_field("start_sin")
+        START_SIN90 = self.tmc.fields.get_field("start_sin90")
+        # START_SIN90 gives the absolute current for
+        # microstep table entry at positions 256
+
+        for i in range(0, 256):
+            if i < X[1] - 1:
+                # Segment 0
+                offset = W[0] - 1
+            elif i < X[2] - 1:
+                # Segment 1
+                offset = W[1] - 1
+            elif i < X[3] - 1:
+                # Segment 2
+                offset = W[2] - 1
+            else:
+                # Segment 3
+                offset = W[3] - 1
+            bit = bit_diffs[i]
+            bit_dec = bit + offset
+            decoded_val.append(bit_dec)
+
+        # Sum diffs one by one
+        sin_value = [START_SIN] # first value is always START_SIN
+        for val in decoded_val:
+            last = sin_value[-1]
+            sin_value.append(last + val)
+
+        if sin_value[-1] != START_SIN90:
+            print("Are you sure? End of 1/4 of sin is not in sync with 2 of 4")
+        if sin_value[0] != START_SIN:
+            print(f"Are you sure? first value is {sin_value[0]} you miss zero crossing")
+
+        # Maybe i'm stupid, as last value is equal it can be ignored..? 257 -> 256
+        sin_value.pop()
+
+        return sin_value
+
+    def mslut_encoder(self, quarter_seg, START_SIN90):
+        if len(quarter_seg) != 256:
+            logging.error("Wrong quarter segment size")
+            raise self.printer.command_error("Quarter segment should have exact 256 elements")
+
+        deltas = []
+        prev_v = quarter_seg[0]
+        for val in quarter_seg:
+            delta = val - prev_v
+            if delta > 3 or delta < -1:
+                logging.error(f"prev: {prev_v}, val: {val} delta can't be encoded")
+                raise self.printer.command_error("MSLUT correction is too big")
+            prev_v = val
+            deltas.append(delta)
+
+        # Search for segments
+        segments = {
+            0: {
+                "start": 0,
+                "min": 2,
+                "max": -1,
+            },
+            1: {
+                "start": 255,
+                "min": 2,
+                "max": -1,
+            },
+            2: {
+                "start": 255,
+                "min": 3,
+                "max": -1,
+            },
+            3: {
+                "start": 255,
+                "min": 3,
+                "max": -1,
+            },
+        }
+        cur_seg = 0
+        # 0 element is always SIN_START?
+        for i in range(1, len(deltas)):
+            smin = segments[cur_seg]["min"]
+            smax = segments[cur_seg]["max"]
+            delta = deltas[i]
+            nsmin = min(smin, delta)
+            nsmax = max(smax, delta)
+            if nsmax - nsmin > 1:
+                logging.info(f"chop new segment at {i}")
+                cur_seg += 1
+                if cur_seg > 3:
+                    logging.error("Can't be encoded: %s" % (quarter_seg))
+                    raise self.printer.command_error("Too many swings")
+                segments[cur_seg]["min"] = delta
+                segments[cur_seg]["max"] = delta
+                segments[cur_seg]["start"] = i
+                continue
+            else:
+                segments[cur_seg]["min"] = nsmin
+                segments[cur_seg]["max"] = nsmax
+
+        W = {}
+        W[0] = (segments[0]["min"] + 1)
+        W[1] = (segments[1]["min"] + 1) % 4
+        W[2] = (segments[2]["min"] + 1) % 4
+        W[3] = (segments[3]["min"] + 1) % 4
+
+        X = {}
+        X[1] = segments[1]["start"]
+        X[2] = segments[2]["start"]
+        X[3] = segments[3]["start"]
+
+        bit_diffs = []
+        # print(deltas)
+        # Width control bit coding W0…W3:
+        # %00: MSLUT entry 0, 1 select: -1, +0
+        # %01: MSLUT entry 0, 1 select: +0, +1
+        # %10: MSLUT entry 0, 1 select: +1, +2
+        # %11: MSLUT entry 0, 1 select: +2, +3
+        WReverseTable = {
+            0: {
+               -1: 0,
+                0: 1,
+            },
+            1: {
+                0: 0,
+                1: 1,
+            },
+            2: {
+                1: 0,
+                2: 1,
+            },
+            3: {
+                2: 0,
+                3: 1,
+            },
+        }
+        _width = 0
+        for pair in [[1, X[1]], [X[1], X[2]], [X[2], X[3]], [X[3], 255]]:
+            width = W[_width]
+            for i in range(pair[0], pair[1]):
+                delta = deltas[i]
+                # print(f"{i}, {width}, {delta} -> {WReverseTable[width][delta]}")
+                bit = WReverseTable[width][delta]
+                if bit != 0 and bit != 1:
+                    logging.error("Something very wrong happens here")
+                    bit = 0
+                bit_diffs.append(bit)
+            _width += 1
+
+        # print(bit_diffs, len(bit_diffs))
+        # Where is 2 last bit missing, possibly becuase ...
+        # first is sin_start and last is sin90?
+        bit_diffs.append(0)
+        bit_diffs.append(0)
+
+        MSLUTS = [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        ]
+        for m in range(0, len(MSLUTS)):
+            for i in range(0, 32):
+                bit = bit_diffs[m * 32 + i]
+                MSLUTS[m] = MSLUTS[m] | (bit << i)
+
+        return {
+            "START_SIN": quarter_seg[0], # Fisrt value is always START_SIN
+            "START_SIN90": START_SIN90,
+            "X": X,
+            "W": W,
+            "MSLUTS": MSLUTS
+        }
+
+    # duct tape
+    def mslut_normalize(self, sin_value):
+        sin_new = sin_value
+        # if sin_new[0] > 3:
+        #     sin_new[0] = 3
+        for i in range(1, 256):
+            if sin_new[i] < 0:
+                sin_new[i] = 0
+            if sin_new[i] > 247:
+                sin_new[i] = 247
+            d = sin_new[i] - sin_new[i-1]
+            if d > 3:
+                sin_new[i] = sin_new[i-1] + 3
+            if d < -1:
+                sin_new[i] = sin_new[i-1] - 1
+        return sin_new
+
+    def _write_to_file(self, filename, samples):
+        import os, multiprocessing
+        def write_impl():
+            try:
+                # Try to re-nice writing process
+                os.nice(20)
+            except:
+                pass
+            import json
+            with open(filename, "w") as fd:
+                for k in samples:
+                    sample = {
+                        k: samples[k],
+                    }
+                    fd.write(json.dumps(sample) + '\n')
+
+        write_proc = multiprocessing.Process(target=write_impl)
+        write_proc.daemon = True
+        write_proc.start()
+
+    def handle_batch(self, msg):
+        if self.is_finished:
+            return False
+        self.msgs.append(msg)
+        return True
+
+    def move(self, distance):
+        move = self.printer.lookup_object('force_move').manual_move
+        move_time = 0.010
+        move_speed = self.full_step_dist / move_time
+        move(self.mcu_stepper, distance, move_speed)
+        self.return_offset -= distance
+
+    def move_reset(self):
+        self.move(self.return_offset)
+
+    def stepper_align(self, target):
+        toolhead = self.printer.lookup_object('toolhead')
+        toolhead.wait_moves()
+        mscnt = self.tmc.get_register("MSCNT")
+        mscnt_prev = mscnt
+        logging.info("MSCNT Cur: %i" % (mscnt))
+        if self.dir == 0:
+            self.dir = 1
+            self.move(self.dir * self.step_dist)
+            toolhead.wait_moves()
+            mscnt = self.tmc.get_register("MSCNT")
+            if mscnt < mscnt_prev:
+                self.dir = -1
+
+        # Normalize target within [0, 1023]
+        target = target % 1024
+        fwd_distance = (target - mscnt + 1024) % 1024
+        bwd_distance = (mscnt - target + 1024) % 1024
+
+        move_direction = -self.dir
+        steps = bwd_distance // self.mscnt_quant
+        if fwd_distance <= bwd_distance:
+            move_direction = self.dir
+            steps = fwd_distance // self.mscnt_quant
+
+        if (steps > 2):
+            self.move(move_direction * self.step_dist * (steps - 2))
+            toolhead.wait_moves()
+            logging.info("MSCNT: %i -> %i" % (mscnt, target))
+            mscnt = self.tmc.get_register("MSCNT")
+
+        while mscnt != target:
+            self.move(move_direction * self.step_dist)
+            toolhead.wait_moves()
+            logging.info("MSCNT: %i -> %i" % (mscnt, target))
+            mscnt = self.tmc.get_register("MSCNT")
+        logging.info("MSCNT Cur: %i" % (mscnt))
+        self.mscnt = target
+
+    cmd_ANGLE_TMC_MSLUT_DUMP_help = "Dump microstep angle data"
+    def cmd_ANGLE_TMC_MSLUT_DUMP(self, gcmd):
+        # Start data collection
+        self.is_finished = False
+        self.printer.lookup_object(self.name).add_client(self.handle_batch)
+
+        # Align stepper to zero
+        toolhead = self.printer.lookup_object('toolhead')
+        self.stepper_align(0 - self.mscnt_min - self.mscnt_quant)
+
+        # Move to each microstep position
+        times = {}
+        angles = {}
+        min_pos = 0 - self.mscnt_min
+        max_pos = 1024 + self.mscnt_min
+        for i in range(min_pos, max_pos, self.mscnt_quant):
+            self.move(self.dir * self.step_dist)
+            start_query_time = toolhead.get_last_move_time() + 0.050
+            end_query_time = start_query_time + 0.050
+            times[i] = (start_query_time, end_query_time)
+            toolhead.dwell(0.150)
+            angles[i] = {
+                "samples": [],
+                "sum": 0,
+                "count": 0
+            }
+
+            # spread computation load
+            deadline = self.reactor.monotonic() + .050
+            while self.msgs and self.reactor.monotonic() < deadline:
+                msg = self.msgs.pop(0)
+                for mscnt in times:
+                    start, end = times[mscnt]
+                    for query_time, pos in msg["data"]:
+                        if query_time >= start and query_time < end:
+                            pos = pos + (1 << 15)
+                            angles[mscnt]["samples"].append(pos)
+                            angles[mscnt]["sum"] += pos
+                            angles[mscnt]["count"] += 1
+                        if query_time > end:
+                            break
+
+        toolhead.wait_moves()
+        # Finish data collection
+        self.is_finished = True
+        self.move_reset()
+        gcmd.respond_info("Start processing tail data: %i" % (len(self.msgs)))
+
+        # Correlate query responses
+        while self.msgs:
+            msg = self.msgs.pop(0)
+            self.reactor.pause(self.reactor.monotonic() + 0.001)
+            for mscnt in times:
+                start, end = times[mscnt]
+                for query_time, pos in msg["data"]:
+                    if query_time >= start and query_time < end:
+                        pos = pos + (1 << 15)
+                        angles[mscnt]["samples"].append(pos)
+                        angles[mscnt]["sum"] += pos
+                        angles[mscnt]["count"] += 1
+                    if query_time > end:
+                        break
+
+        for mscnt in angles:
+            avg = angles[mscnt]["sum"]/angles[mscnt]["count"]
+            angles[mscnt]["avg"] = avg
+            angles[mscnt]["angle_avg"] = avg * 360 / (1 << 16)
+
+        gcmd.respond_info("Write to /tmp/angle-tmc-samples.json")
+        self._write_to_file("/tmp/angle-tmc-samples.json", angles)
+
+    def twindow_to_angle(self, start, end):
+        samples = []
+        search = True
+        while search:
+            while not self.msgs:
+                self.reactor.pause(self.reactor.monotonic() + 0.01)
+            msg = self.msgs.pop(0)
+            for query_time, pos in msg["data"]:
+                if query_time >= start and query_time < end:
+                    samples.append(pos + (1 << 15))
+                if query_time > end:
+                    search = False
+                    break
+
+        avg = sum(samples)/len(samples)
+        angle_avg = avg * 360 / (1 << 16)
+        if self.microsteps == 256:
+            return round(angle_avg, 8)
+        if self.microsteps == 128:
+            return round(angle_avg, 7)
+        if self.microsteps == 64:
+            return round(angle_avg, 6)
+        if self.microsteps == 32:
+            return round(angle_avg, 5)
+        return round(angle_avg, 4)
+
+    def last_move_angle(self):
+        toolhead = self.printer.lookup_object('toolhead')
+        start = toolhead.get_last_move_time() + 0.050
+        end = start + 0.050
+        return self.twindow_to_angle(start, end)
+
+    cmd_ANGLE_TMC_CALIBRATE_help = "Calibrate stepper driver by angle sensor"
+    def cmd_ANGLE_TMC_CALIBRATE(self, gcmd):
+        # Start data collection
+        self.is_finished = False
+        self.printer.lookup_object(self.name).add_client(self.handle_batch)
+
+        # abs angle distance
+        def adist(a1, a2):
+            diff = (a1 - a2 + 180) % 360 - 180
+            return abs(diff)
+
+        def dist(a1, a2):
+            diff = (a1 - a2 + 180) % 360 - 180
+            return diff
+
+        # Align stepper to zero
+        fs_angles = {}
+        fs_angle = 360 / self.full_steps
+        fs_diffs = []
+        for i in range(0, 5):
+            self.stepper_align(0 - self.mscnt_min + 256 * i)
+            fs_angles[i] = self.last_move_angle()
+            if i > 0:
+                adiff = adist(fs_angles[i], fs_angles[i-1])
+                fs_diffs.append(adiff)
+
+        gcmd.respond_info("FullStep %.1f angles: %.2f %.2f %.2f %.2f" %
+                          (fs_angle, fs_diffs[0], fs_diffs[1],
+                           fs_diffs[2], fs_diffs[3]))
+
+        offset = fs_diffs.index(max(fs_diffs)) * 256
+        angle_dir = 1
+        if fs_angles[0] > fs_angles[2]:
+            angle_dir = -1
+
+        ms_angle = max(fs_diffs) / self.microsteps
+        gcmd.respond_info("Ideal step angle: %.6f" % (ms_angle))
+        quant = self.mscnt_quant
+        positions = [i for i in range(self.mscnt_min, 256, quant)]
+
+        import numpy as np
+        from numpy.polynomial import Polynomial
+
+        max_adiff = float('inf')
+        min_adiff = -float('inf')
+        min_dist_prev = 1
+        max_dist_prev = 0
+        not_matched_prev = self.microsteps
+        stddev_prev = 1
+        improved = True
+        ms_angle_min = ms_angle * 0.25
+        ms_angle_max = ms_angle * 1.25
+        if self.microsteps > 64:
+            ms_angle_min = ms_angle * 0.50
+            ms_angle_max = ms_angle * 1.50
+        tries = 3
+        while improved and tries:
+            matched = 0
+            not_matched = 0
+            self.move(4 * self.dir * self.full_step_dist)
+            self.move_reset()
+            start_offset = 0 - self.mscnt_min + offset
+            self.stepper_align(0 - self.mscnt_min + offset)
+            sin_value = self.mslut_decoder()
+            sin_value90 = sin_value.copy()
+            sin_value90.reverse()
+            sin_value.extend(sin_value90)
+
+            # For incrimental tuning
+            prev_angle = self.last_move_angle()
+            # Try converge to ideal steps
+            ideal_angle = prev_angle
+            min_dist = 1
+            max_dist = 0
+            ms_diffs = []
+            ms_dist = []
+
+            for pos in positions:
+                self.move(self.dir * self.step_dist)
+                pos_angle = self.last_move_angle()
+                adiff = adist(prev_angle, pos_angle)
+                ms_diffs.append(adiff)
+                # max_adiff = max(max_adiff, adiff)
+                # min_adiff = min(min_adiff, adiff)
+                prev_angle = pos_angle
+                distance = dist(ideal_angle, pos_angle)
+                min_dist = min(min_dist, distance)
+                max_dist = max(max_dist, distance)
+                ms_dist.append(distance)
+                ideal_angle += ms_angle * angle_dir
+                # logging.info(f"pos: {start_offset + pos}, target: {prev_angle + ms_angle}, actual: {pos_angle}, distance: {distance}")
+                if distance < -ms_angle_min:
+                    if self.microsteps == 128:
+                        sin_value[pos-1] += 0.5
+                        sin_value[pos] += 1
+                        sin_value[pos+1] += 0.5
+                    else:
+                        sin_value[pos] = sin_value[pos+1]
+                        sin_value[pos+1] = sin_value[pos+2]
+                    not_matched += 1
+                elif distance > ms_angle_min:
+                    if self.microsteps == 128:
+                        sin_value[pos-1] -= 0.5
+                        sin_value[pos] -= 1
+                        sin_value[pos+1] -= 0.5
+                    elif pos > 2:
+                        sin_value[pos] = sin_value[pos-1]
+                        sin_value[pos-1] = sin_value[pos-2]
+                    not_matched += 1
+                else:
+                    matched += 1
+
+            gcmd.respond_info("Step distance Min %.6f, Max %.6f" % (min_dist, max_dist))
+            stddev = np.std(ms_dist)
+            gcmd.respond_info("Unaligned steps: %i, stddev: %.4f" % (not_matched, stddev))
+            improved = (max_dist < max_dist_prev or
+                        min_dist > min_dist_prev or
+                        not_matched < not_matched_prev or
+                        stddev < stddev_prev)
+            if not improved:
+                tries -= 1
+
+            max_dist_prev = max_dist
+            min_dist_prev = min_dist
+            not_matched_prev = not_matched
+            stddev_prev = stddev
+
+            sin_value = sin_value[:256]
+            logging.info(sin_value)
+            x = [i for i in range(0, 256)]
+            y = sin_value
+            p = Polynomial.fit(x, y, 4)
+            x_new = np.linspace(x[0], x[-1], 256)
+            y_new = p(x_new)
+            def rclamp(f):
+                v = round(f)
+                return min(max(v, 0), 247)
+            sin_new = [rclamp(i) for i in y_new]
+            logging.info(sin_new)
+            sin_new = self.mslut_normalize(sin_new)
+            mslut = self.mslut_encoder(sin_new, sin_new[-1])
+            cfgname = self.driver_name
+            configfile = self.printer.lookup_object('configfile')
+            for i in range(0, 8):
+                self.tmc.fields.set_field("mslut%i" % (i), mslut["MSLUTS"][i])
+                configfile.set(cfgname, 'driver_MSLUT%i' % (i), mslut["MSLUTS"][i])
+            for i in range(1, 4):
+                self.tmc.fields.set_field("x%i" % (i), mslut["X"][i])
+                configfile.set(cfgname, 'driver_X%i' % (i), mslut["X"][i])
+            for i in range(0, 4):
+                self.tmc.fields.set_field("w%i" % (i), mslut["W"][i])
+                configfile.set(cfgname, 'driver_W%i' % (i), mslut["W"][i])
+
+            self.tmc.fields.set_field("start_sin", mslut["START_SIN"])
+            self.tmc.fields.set_field("start_sin90", mslut["START_SIN90"])
+            configfile.set(cfgname, 'driver_START_SIN', mslut["START_SIN"])
+            configfile.set(cfgname, 'driver_START_SIN90', mslut["START_SIN90"])
+
+        self.is_finished = True
+        self.msgs = []
+        gcmd.respond_info("Can't improve farther, you can click save config")
+
 class HelperA1333:
     SPI_MODE = 3
     SPI_SPEED = 10000000
@@ -423,6 +1063,7 @@ class Angle:
         self.sample_period = config.getfloat('sample_period', SAMPLE_PERIOD,
                                              above=0.)
         self.calibration = AngleCalibration(config)
+        self.tmc_calibration = AngleTMCCalibration(config)
         # Measurement conversion
         self.start_clock = self.time_shift = self.sample_ticks = 0
         self.last_sequence = self.last_angle = 0
