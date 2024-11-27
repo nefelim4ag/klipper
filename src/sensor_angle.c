@@ -17,6 +17,7 @@ enum {
     SA_CHIP_A1333,
     SA_CHIP_AS5047D,
     SA_CHIP_TLE5012B,
+    SA_CHIP_MT6701,
     SA_CHIP_MT6816,
     SA_CHIP_MAX
 };
@@ -24,6 +25,7 @@ enum {
 DECL_ENUMERATION("spi_angle_type", "a1333", SA_CHIP_A1333);
 DECL_ENUMERATION("spi_angle_type", "as5047d", SA_CHIP_AS5047D);
 DECL_ENUMERATION("spi_angle_type", "tle5012b", SA_CHIP_TLE5012B);
+DECL_ENUMERATION("spi_angle_type", "mt6701", SA_CHIP_MT6701);
 DECL_ENUMERATION("spi_angle_type", "mt6816", SA_CHIP_MT6816);
 
 enum { TCODE_ERROR = 0xff };
@@ -170,6 +172,41 @@ as5047d_query(struct spi_angle *sa, uint32_t stime)
         angle_add_error(sa, SE_NO_ANGLE);
     else
         angle_add_data(sa, stime, mtime2, (msg[0] << 10) | (msg[1] << 2));
+}
+
+static uint8_t crc6(uint8_t *msg)
+{
+    uint32_t polynomial = 0x43;
+    uint8_t crc = 0x00;
+    uint32_t data = (msg[0] << 10) | ( msg[1] << 2) | (msg[2] >> 6);
+
+    for (int i = 17; i >= 0; i--) {
+        if (data & (1 << i))
+            data ^= (polynomial << (i - 6));
+    }
+
+    crc = data & 0x3F;
+    return crc;
+}
+
+static void mt6701_query(struct spi_angle *sa, uint32_t stime)
+{
+    uint8_t msg[3] = {0x00, 0x00, 0x00};
+    uint32_t mtime1 = timer_read_time();
+    spidev_transfer(sa->spi, 1, sizeof(msg), msg);
+    uint32_t mtime2 = timer_read_time();
+    // Data is latched on first sclk edge of response
+    if (mtime2 - mtime1 > MAX_SPI_READ_TIME) {
+        angle_add_error(sa, SE_SPI_TIME);
+        return;
+    }
+    uint8_t crc = crc6(msg);
+    if (crc != (msg[2] & 0x3F))
+        angle_add_error(sa, SE_CRC);
+    else if (msg[1] & 0x03 || msg[2] & 0x02)
+        angle_add_error(sa, SE_NO_ANGLE);
+    else
+        angle_add_data(sa, stime, mtime2, (msg[0] << 8) | (msg[1] & 0xfc));
 }
 
 static void mt6816_query(struct spi_angle *sa, uint32_t stime)
@@ -334,6 +371,8 @@ spi_angle_task(void)
             as5047d_query(sa, stime);
         else if (chip == SA_CHIP_TLE5012B)
             tle5012b_query(sa, stime);
+        else if (chip == SA_CHIP_MT6701)
+            mt6701_query(sa, stime);
         else if (chip == SA_CHIP_MT6816)
             mt6816_query(sa, stime);
         angle_check_report(sa, oid);
