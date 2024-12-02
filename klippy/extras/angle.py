@@ -1017,26 +1017,20 @@ class AngleTMCCalibration:
                     not_matched += 1
                     if self.microsteps <= 32:
                         sin_ups[pos-3] += change/8
-                        sin_ups[pos+3] += change/8
                     if self.microsteps <= 64:
                         sin_ups[pos-2] += change/4
-                        sin_ups[pos+2] += change/4
                     if self.microsteps <= 128:
                         sin_ups[pos-1] += change/2
-                        sin_ups[pos+1] += change/2
                     sin_ups[pos] += change
                     up += 1
                 elif distance > self.misalign:
                     not_matched += 1
                     if self.microsteps <= 32:
                         sin_downs[pos-3] -= change/8
-                        sin_downs[pos+3] -= change/8
                     if self.microsteps <= 64:
                         sin_downs[pos-2] -= change/4
-                        sin_downs[pos+2] -= change/4
                     if self.microsteps <= 128:
                         sin_downs[pos-1] -= change/2
-                        sin_downs[pos+1] -= change/2
                     sin_downs[pos] -= change
                     down += 1
                 else:
