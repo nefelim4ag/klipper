@@ -1041,14 +1041,12 @@ class AngleTMCCalibration:
                 pc = pos[p]
                 pn = pos[(p+1) % len(pos)]
                 if sin_ups[pc] == sin_ups[pn]:
-                    logging.info(f"up {pc}, {pc+self.mscnt_quant}")
                     for i in range(pc, pc+self.mscnt_quant):
-                        sin_ups[i % 256] == sin_ups[pc]
+                        sin_ups[i % 256] = sin_ups[pc]
 
                 if sin_downs[pc] == sin_downs[pn]:
-                    logging.info(f"down {pc}, {pc+self.mscnt_quant}")
                     for i in range(pc, pc+self.mscnt_quant):
-                        sin_downs[i % 256] == sin_downs[pc]
+                        sin_downs[i % 256] = sin_downs[pc]
 
             sin_up = sin_ups.copy()
             sin_down = sin_downs.copy()
