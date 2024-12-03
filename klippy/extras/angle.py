@@ -576,19 +576,23 @@ class AngleTMCCalibration:
 
         return sin_value
 
-    def mslut_encoder(self, quarter_seg, START_SIN90):
+    def mslut_encoder(self, quarter_seg):
+        START_SIN90 = quarter_seg[-1]
         if len(quarter_seg) != 256:
             logging.error("Wrong quarter segment size")
             raise self.printer.command_error("Quarter segment should have exact 256 elements")
 
-        deltas = []
-        prev_v = quarter_seg[0]
-        for val in quarter_seg:
-            delta = val - prev_v
-            if delta > 3 or delta < -1:
-                logging.error(f"prev: {prev_v}, val: {val} delta can't be encoded")
-                raise self.printer.command_error("MSLUT correction is too big")
-            prev_v = val
+        deltas = [0]
+        for i in range(1, 256):
+            delta = quarter_seg[i] - quarter_seg[i-1]
+            if delta > 3:
+                quarter_seg[i+1] += delta - 3
+                quarter_seg[i] = quarter_seg[i-1] + 3
+                delta = 3
+            if delta < -1:
+                quarter_seg[i+1] += delta+1
+                quarter_seg[i] = quarter_seg[i-1] - 1
+                delta = -1
             deltas.append(delta)
 
         # Search for segments
@@ -615,7 +619,6 @@ class AngleTMCCalibration:
             },
         }
         cur_seg = 0
-        # 0 element is always SIN_START?
         for i in range(1, len(deltas)):
             smin = segments[cur_seg]["min"]
             smax = segments[cur_seg]["max"]
@@ -623,14 +626,15 @@ class AngleTMCCalibration:
             nsmin = min(smin, delta)
             nsmax = max(smax, delta)
             if nsmax - nsmin > 1:
-                logging.info(f"chop new segment at {i}")
                 cur_seg += 1
                 if cur_seg > 3:
                     logging.error("Can't be encoded: %s" % (quarter_seg))
                     raise self.printer.command_error("Too many swings")
-                segments[cur_seg]["min"] = delta
-                segments[cur_seg]["max"] = delta
-                segments[cur_seg]["start"] = i
+                segments[cur_seg] = {
+                    "min": delta,
+                    "max": delta,
+                    "start": i
+                }
                 continue
             else:
                 segments[cur_seg]["min"] = nsmin
@@ -728,12 +732,17 @@ class AngleTMCCalibration:
                 sin_new[i] += 1
 
         for i in range(1, 256):
-            sin_new[i] = min(247, sin_new[i])
             d = sin_new[i] - sin_new[i-1]
             if d > 3:
                 sin_new[i] = sin_new[i-1] + 3
+                if i < 255:
+                    sin_new[i+1] += d - 3
             if d < -1:
                 sin_new[i] = sin_new[i-1] - 1
+                if i < 255:
+                    sin_new[i+1] += d + 1
+            sin_new[i] = min(247, sin_new[i])
+
         return sin_new
 
     def twindow_to_angle(self, start):
@@ -895,7 +904,7 @@ class AngleTMCCalibration:
         return right
 
     def sin_apply(self, sin_new):
-        mslut = self.mslut_encoder(sin_new, sin_new[-1])
+        mslut = self.mslut_encoder(sin_new)
         # Try to reload driver to apply MSLUT*
         self._force_disable()
         for i in range(0, 8):
@@ -983,8 +992,6 @@ class AngleTMCCalibration:
             sin_value90 = sin_value.copy()
             sin_value90.reverse()
             sin_value.extend(sin_value90)
-            sin_ups = sin_value.copy()
-            sin_downs = sin_value.copy()
             # For incrimental tuning
             prev_angle = self.last_move_angle()
             # Try converge to ideal steps
@@ -992,7 +999,8 @@ class AngleTMCCalibration:
             min_dist = 1
             max_dist = 0
             ms_dist = []
-
+            sin_ups = [0 for i in range(0, 256)]
+            sin_downs = [0 for i in range(0, 256)]
             for pos in self.positions:
                 self.move(self.dir * self.step_dist * 2)
                 self.move(-self.dir * self.step_dist)
@@ -1015,26 +1023,38 @@ class AngleTMCCalibration:
                     break
                 if distance < -self.misalign:
                     not_matched += 1
-                    if self.microsteps <= 32:
-                        sin_ups[pos-3] += change/8
-                    if self.microsteps <= 64:
-                        sin_ups[pos-2] += change/4
-                    if self.microsteps <= 128:
-                        sin_ups[pos-1] += change/2
                     sin_ups[pos] += change
                     up += 1
                 elif distance > self.misalign:
                     not_matched += 1
-                    if self.microsteps <= 32:
-                        sin_downs[pos-3] -= change/8
-                    if self.microsteps <= 64:
-                        sin_downs[pos-2] -= change/4
-                    if self.microsteps <= 128:
-                        sin_downs[pos-1] -= change/2
                     sin_downs[pos] -= change
                     down += 1
                 else:
                     matched += 1
+            for i in range(0,256):
+                sin_ups[i] = round(sin_ups[i], 2)
+                sin_downs[i] = round(sin_downs[i], 2)
+
+            # spread changes
+            pos = [p for p in range(self.mscnt_min, 256, self.mscnt_quant)]
+            for p in range(0, len(pos)):
+                pc = pos[p]
+                pn = pos[(p+1) % len(pos)]
+                if sin_ups[pc] == sin_ups[pn]:
+                    logging.info(f"up {pc}, {pc+self.mscnt_quant}")
+                    for i in range(pc, pc+self.mscnt_quant):
+                        sin_ups[i % 256] == sin_ups[pc]
+
+                if sin_downs[pc] == sin_downs[pn]:
+                    logging.info(f"down {pc}, {pc+self.mscnt_quant}")
+                    for i in range(pc, pc+self.mscnt_quant):
+                        sin_downs[i % 256] == sin_downs[pc]
+
+            sin_up = sin_ups.copy()
+            sin_down = sin_downs.copy()
+            for i in range(0, 256):
+                sin_up[i] += sin_value[i]
+                sin_down[i] += sin_value[i]
 
             gcmd.respond_info("Step distance Min %.6f, Max %.6f" % (min_dist, max_dist))
             stddev = std(ms_dist)
@@ -1056,10 +1076,12 @@ class AngleTMCCalibration:
                 gcmd.respond_info("stddev only increasing - abort")
                 break
 
-            sin_ups = self.fit(sin_ups)
-            sin_downs = self.fit(sin_downs)
-            sin_new = self.choise_best(sin_ups, sin_downs)
-            if sin_ups == sin_new:
+            logging.info(f"sin_up: {sin_up}")
+            logging.info(f"sin_down: {sin_down}")
+            sin_up = self.fit(sin_up)
+            sin_down = self.fit(sin_down)
+            sin_new = self.choise_best(sin_up, sin_down)
+            if sin_up == sin_new:
                 gcmd.respond_info("Follow up")
             else:
                 gcmd.respond_info("Follow down")
@@ -1073,7 +1095,7 @@ class AngleTMCCalibration:
 
         best = min(history, key=lambda x: x["stddev"])
         sin_new = best["sin"]
-        mslut = self.mslut_encoder(sin_new, sin_new[-1])
+        mslut = self.mslut_encoder(sin_new)
         self.sin_apply(sin_new)
         self.move_reset()
 
