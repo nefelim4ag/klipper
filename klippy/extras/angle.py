@@ -576,7 +576,8 @@ class AngleTMCCalibration:
 
         return sin_value
 
-    def mslut_encoder(self, quarter_seg):
+    def mslut_encoder(self, quarter_seg, safe=False):
+        logging.info(f"len {len(quarter_seg)} {quarter_seg}")
         START_SIN90 = quarter_seg[-1]
         if len(quarter_seg) != 256:
             logging.error("Wrong quarter segment size")
@@ -628,6 +629,8 @@ class AngleTMCCalibration:
             if nsmax - nsmin > 1:
                 cur_seg += 1
                 if cur_seg > 3:
+                    if safe:
+                        return None
                     logging.error("Can't be encoded: %s" % (quarter_seg))
                     raise self.printer.command_error("Too many swings")
                 segments[cur_seg] = {
@@ -837,6 +840,17 @@ class AngleTMCCalibration:
         self.move(self.full_step_dist * 8)
         self.move(self.full_step_dist * -8)
 
+    def interp(self, sin_value):
+        from numpy import interp
+        x = [i for i in range(self.mscnt_min, 256, self.mscnt_quant)]
+        y = [sin_value[i] for i in x]
+        y_i = [0] + y + [y[-1]]
+        x_i = [0] + x + [255]
+        y_new = [i for i in range(0, 256)]
+        for i in range(0, 256):
+            y_new[i] = round(interp(i, x_i, y_i))
+        return y_new
+
     def fit(self, sin_value):
         from numpy import linspace
         from numpy.polynomial import Polynomial
@@ -847,6 +861,12 @@ class AngleTMCCalibration:
         x_new = linspace(0, 256, 256)
         y_new = p(x_new)
         return self.mslut_normalize(y_new)
+
+    def interp_or_fit(self, sin_value):
+        interp = self.interp(sin_value)
+        if self.mslut_encoder(interp, safe=True):
+            return interp
+        return self.fit(sin_value)
 
     def choise_best(self, left, right):
         from numpy import std
@@ -1052,8 +1072,9 @@ class AngleTMCCalibration:
                 gcmd.respond_info("stddev only increasing - abort")
                 break
 
-            sin_up = self.fit(sin_up)
-            sin_down = self.fit(sin_down)
+            # Utilize stupid interpolation when possible
+            sin_up = self.interp_or_fit(sin_up)
+            sin_down = self.interp_or_fit(sin_down)
             logging.info(f"sin_up: {sin_up}")
             logging.info(f"sin_down: {sin_down}")
             sin_new = self.choise_best(sin_up, sin_down)
