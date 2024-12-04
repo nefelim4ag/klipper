@@ -841,10 +841,10 @@ class AngleTMCCalibration:
         from numpy import linspace
         from numpy.polynomial import Polynomial
         sin_value = sin_value[:256]
-        x = [i for i in range(0, 256)]
-        y = sin_value
+        x = [i for i in range(self.mscnt_min, 256, self.mscnt_quant)]
+        y = [sin_value[i] for i in x]
         p = Polynomial.fit(x, y, 4)
-        x_new = linspace(x[0], x[-1], 256)
+        x_new = linspace(0, 256, 256)
         y_new = p(x_new)
         return self.mslut_normalize(y_new)
 
@@ -999,8 +999,8 @@ class AngleTMCCalibration:
             min_dist = 1
             max_dist = 0
             ms_dist = []
-            sin_ups = [0 for i in range(0, 256)]
-            sin_downs = [0 for i in range(0, 256)]
+            sin_up = sin_value.copy()
+            sin_down = sin_value.copy()
             for pos in self.positions:
                 self.move(self.dir * self.step_dist * 2)
                 self.move(-self.dir * self.step_dist)
@@ -1023,36 +1023,14 @@ class AngleTMCCalibration:
                     break
                 if distance < -self.misalign:
                     not_matched += 1
-                    sin_ups[pos] += change
+                    sin_up[pos] += change
                     up += 1
                 elif distance > self.misalign:
                     not_matched += 1
-                    sin_downs[pos] -= change
+                    sin_down[pos] -= change
                     down += 1
                 else:
                     matched += 1
-            for i in range(0,256):
-                sin_ups[i] = round(sin_ups[i], 2)
-                sin_downs[i] = round(sin_downs[i], 2)
-
-            # spread changes
-            pos = [p for p in range(self.mscnt_min, 256, self.mscnt_quant)]
-            for p in range(0, len(pos)):
-                pc = pos[p]
-                pn = pos[(p+1) % len(pos)]
-                if sin_ups[pc] == sin_ups[pn]:
-                    for i in range(pc, pc+self.mscnt_quant):
-                        sin_ups[i % 256] = sin_ups[pc]
-
-                if sin_downs[pc] == sin_downs[pn]:
-                    for i in range(pc, pc+self.mscnt_quant):
-                        sin_downs[i % 256] = sin_downs[pc]
-
-            sin_up = sin_ups.copy()
-            sin_down = sin_downs.copy()
-            for i in range(0, 256):
-                sin_up[i] += sin_value[i]
-                sin_down[i] += sin_value[i]
 
             gcmd.respond_info("Step distance Min %.6f, Max %.6f" % (min_dist, max_dist))
             stddev = std(ms_dist)
@@ -1074,10 +1052,10 @@ class AngleTMCCalibration:
                 gcmd.respond_info("stddev only increasing - abort")
                 break
 
-            logging.info(f"sin_up: {sin_up}")
-            logging.info(f"sin_down: {sin_down}")
             sin_up = self.fit(sin_up)
             sin_down = self.fit(sin_down)
+            logging.info(f"sin_up: {sin_up}")
+            logging.info(f"sin_down: {sin_down}")
             sin_new = self.choise_best(sin_up, sin_down)
             if sin_up == sin_new:
                 gcmd.respond_info("Follow up")
