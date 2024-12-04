@@ -586,13 +586,13 @@ class AngleTMCCalibration:
         for i in range(1, 256):
             delta = quarter_seg[i] - quarter_seg[i-1]
             if delta > 3:
-                quarter_seg[i+1] += delta - 3
-                quarter_seg[i] = quarter_seg[i-1] + 3
-                delta = 3
+                if safe:
+                    return None
+                raise self.printer.command_error(f"Can't be encoded delta > 3: {quarter_seg}")
             if delta < -1:
-                quarter_seg[i+1] += delta+1
-                quarter_seg[i] = quarter_seg[i-1] - 1
-                delta = -1
+                if safe:
+                    return None
+                raise self.printer.command_error(f"Can't be encoded delta < -1: {quarter_seg}")
             deltas.append(delta)
 
         # Search for segments
