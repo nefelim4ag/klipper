@@ -1070,7 +1070,12 @@ class AngleTMCCalibration:
             sin_down = self.fit(sin_down)
             logging.info(f"sin_up: {sin_up}")
             logging.info(f"sin_down: {sin_down}")
-            sin_new = self.choise_best(sin_up, sin_down)
+            sin_new = sin_down
+            if up > 0 and down > 0:
+                sin_new = self.choise_best(sin_up, sin_down)
+            elif down == 0:
+                sin_new = sin_up
+
             if sin_up == sin_new:
                 gcmd.respond_info("Follow up")
             else:
