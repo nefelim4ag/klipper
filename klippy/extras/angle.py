@@ -577,7 +577,6 @@ class AngleTMCCalibration:
         return sin_value
 
     def mslut_encoder(self, quarter_seg, safe=False):
-        logging.info(f"len {len(quarter_seg)} {quarter_seg}")
         START_SIN90 = quarter_seg[-1]
         if len(quarter_seg) != 256:
             logging.error("Wrong quarter segment size")
@@ -862,12 +861,6 @@ class AngleTMCCalibration:
         y_new = p(x_new)
         return self.mslut_normalize(y_new)
 
-    def interp_or_fit(self, sin_value):
-        interp = self.interp(sin_value)
-        if self.mslut_encoder(interp, safe=True):
-            return interp
-        return self.fit(sin_value)
-
     def choise_best(self, left, right):
         from numpy import std
 
@@ -1073,8 +1066,8 @@ class AngleTMCCalibration:
                 break
 
             # Utilize stupid interpolation when possible
-            sin_up = self.interp_or_fit(sin_up)
-            sin_down = self.interp_or_fit(sin_down)
+            sin_up = self.fit(sin_up)
+            sin_down = self.fit(sin_down)
             logging.info(f"sin_up: {sin_up}")
             logging.info(f"sin_down: {sin_down}")
             sin_new = self.choise_best(sin_up, sin_down)
