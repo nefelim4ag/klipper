@@ -847,8 +847,8 @@ class AngleTMCCalibration:
         x_i = [0] + x + [255]
         y_new = [i for i in range(0, 256)]
         for i in range(0, 256):
-            y_new[i] = round(interp(i, x_i, y_i))
-        return y_new
+            y_new[i] = interp(i, x_i, y_i)
+        return self.mslut_normalize(y_new)
 
     def fit(self, sin_value):
         from numpy import linspace
