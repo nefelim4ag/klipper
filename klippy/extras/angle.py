@@ -376,7 +376,7 @@ class AngleTMCCalibration:
         if intpol:
             wait = True
             while wait:
-                self.pause()
+                self.pause(0.05)
                 m = self.tmc.get_register("MSCNT") % self.mscnt_quant
                 wait = m != self.mscnt_min
 
