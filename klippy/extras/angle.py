@@ -855,7 +855,7 @@ class AngleTMCCalibration:
         from numpy.polynomial import Polynomial
         sin_value = sin_value[:256]
         x = [0] + [i for i in range(self.mscnt_min, 256, self.mscnt_quant)] + [255]
-        y = [0] + [sin_value[i] for i in x] + [248]
+        y = [sin_value[i] for i in x]
         p = Polynomial.fit(x, y, 4)
         x_new = linspace(0, 256, 256)
         y_new = p(x_new)
