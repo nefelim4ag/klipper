@@ -855,7 +855,7 @@ class AngleTMCCalibration:
         p = Polynomial.fit(x, y, 4)
         x_new = linspace(0, 256, 256)
         y_new = p(x_new)
-        if y_new[0] < 0 or y_new[-1] > 248:
+        if y_new[0] < 0 or y_new[0] > 3 or y_new[-1] > 248:
             logging.warning("fit - fallback to fit safe")
             return self.fit_safe(sin_value)
         return self.mslut_normalize(y_new)
@@ -1064,8 +1064,8 @@ class AngleTMCCalibration:
                 break
 
             # Utilize stupid interpolation when possible
-            sin_up = self.interp_or_fit(sin_up)
-            sin_down = self.interp_or_fit(sin_down)
+            sin_up = self.fit(sin_up)
+            sin_down = self.fit(sin_down)
             logging.info(f"sin_up = {sin_up}")
             logging.info(f"sin_down = {sin_down}")
             sin_new = sin_down
