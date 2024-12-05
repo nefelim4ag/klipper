@@ -495,8 +495,10 @@ class AngleTMCCalibration:
             angles[mscnt]["avg"] = avg
             angles[mscnt]["angle_avg"] = avg * 360 / (1 << 16)
 
-        gcmd.respond_info("Write to /tmp/angle-tmc-samples.json")
-        self._write_to_file("/tmp/angle-tmc-samples.json", angles)
+        file = f"/tmp/angle-tmc-samples-{self.microsteps}ms.json"
+        gcmd.respond_info(
+            f"Write to {file}")
+        self._write_to_file(file, angles)
 
     def mslut_decoder(self):
         MSLUTS = [
