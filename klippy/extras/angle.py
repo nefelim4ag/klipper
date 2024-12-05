@@ -1066,17 +1066,17 @@ class AngleTMCCalibration:
                 gcmd.respond_info("stddev only increasing - abort")
                 break
 
-            # Utilize stupid interpolation when possible
             sin_up = self.fit(sin_up)
             sin_down = self.fit(sin_down)
             logging.info(f"sin_up = {sin_up}")
             logging.info(f"sin_down = {sin_down}")
             sin_new = sin_down
-            if abs(min_dist) / 2 > max_dist:
-                sin_new = sin_up
-            elif max_dist / 2 > abs(min_dist):
-                sin_new = sin_down
-            elif up > 0 and down > 0:
+            # Can't converge by some reason
+            # if abs(min_dist) / 2 > max_dist:
+            #     sin_new = sin_up
+            # elif max_dist / 2 > abs(min_dist):
+            #     sin_new = sin_down
+            if up > 0 and down > 0:
                 sin_new = self.choise_best(sin_up, sin_down)
             elif down == 0:
                 sin_new = sin_up
