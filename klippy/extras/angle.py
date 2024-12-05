@@ -1038,7 +1038,7 @@ class AngleTMCCalibration:
                 ))
                 ideal_angle += self.ms_angle * self.angle_dir
                 # Average over fullstep
-                change = min(1, abs(distance) / 4 / (fs_4_diff/4/256))
+                change = 0.25
                 pos = pos % 256
                 if distance > 1 or distance < -1:
                     gcmd.respond_info("Driver went crazy - Abort")
