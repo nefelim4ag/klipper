@@ -374,11 +374,7 @@ class AngleTMCCalibration:
         toolhead.wait_moves()
         intpol = self.tmc.fields.get_field("intpol")
         if intpol:
-            wait = True
-            while wait:
-                self.pause(0.05)
-                m = self.tmc.get_register("MSCNT") % self.mscnt_quant
-                wait = m != self.mscnt_min
+            self.pause(0.1)
 
     def stepper_align(self, target):
         self.move(self.step_dist * 3)
