@@ -1026,17 +1026,16 @@ class AngleTMCCalibration:
                 self.move(self.dir * self.step_dist * 2)
                 self.move(-self.dir * self.step_dist)
                 pos_angle = self.last_move_angle()
-                prev_angle = pos_angle
                 distance = dist(ideal_angle, pos_angle)
                 min_dist = min(min_dist, distance)
                 max_dist = max(max_dist, distance)
                 ms_dist.append(distance)
-                # logging.info("pos: %i, target: %.4f, actual: %.4f, distance: %.4f" % (
-                #     pos, ideal_angle, pos_angle, distance
-                # ))
+                logging.info("pos: %i, target: %.4f, actual: %.4f, distance: %.4f" % (
+                    pos, ideal_angle, pos_angle, distance
+                ))
                 ideal_angle += self.ms_angle * self.angle_dir
                 # Average over fullstep
-                change = min(1, max(0.25, abs(distance) / 4 / (fs_4_diff/4/256)))
+                change = min(1, abs(distance) / 4 / (fs_4_diff/4/256))
                 pos = pos % 256
                 if distance > 1 or distance < -1:
                     gcmd.respond_info("Driver went crazy - Abort")
