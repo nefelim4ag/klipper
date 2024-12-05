@@ -883,18 +883,20 @@ class AngleTMCCalibration:
         prev_angle = self.last_move_angle()
         ideal_angle = prev_angle + self.ms_angle * self.angle_dir
         ms_dist = []
-
+        min_dist = 1
+        max_dist = 0
         for pos in self.positions:
             self.move(self.dir * self.step_dist * 2)
             self.move(-self.dir * self.step_dist)
             pos_angle = self.last_move_angle()
 
-            prev_angle = pos_angle
             distance = dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
             ideal_angle += self.ms_angle * self.angle_dir
-
+            min_dist = min(min_dist, distance)
+            max_dist = max(max_dist, distance)
         left_stddev = std(ms_dist)
+        left_dist_sum = abs(min_dist) + abs(max_dist)
 
         self.sin_apply(right)
         self.move_reset()
@@ -902,19 +904,22 @@ class AngleTMCCalibration:
         prev_angle = self.last_move_angle()
         ideal_angle = prev_angle + self.ms_angle * self.angle_dir
         ms_dist = []
-
+        min_dist = 1
+        max_dist = 0
         for pos in self.positions:
             self.move(self.dir * self.step_dist * 2)
             self.move(-self.dir * self.step_dist)
             pos_angle = self.last_move_angle()
 
-            prev_angle = pos_angle
             distance = dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
             ideal_angle += self.ms_angle * self.angle_dir
-
+            min_dist = min(min_dist, distance)
+            max_dist = max(max_dist, distance)
         right_stddev = std(ms_dist)
-        if left_stddev < right_stddev:
+        right_dist_sum = abs(min_dist) + abs(max_dist)
+
+        if left_dist_sum < right_dist_sum:
             return left
         return right
 
