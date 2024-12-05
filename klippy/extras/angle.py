@@ -369,18 +369,32 @@ class AngleTMCCalibration:
     def move_reset(self):
         self.move(self.return_offset)
 
-    def stepper_align(self, target):
+    def intpol_wait(self):
         toolhead = self.printer.lookup_object('toolhead')
-        # It works bad at cold start, move it to different position
-        self.move(self.step_dist * 3)
         toolhead.wait_moves()
+        intpol = self.tmc.fields.get_field("intpol")
+        if intpol:
+            wait = True
+            while wait:
+                self.pause()
+                m = self.tmc.get_register("MSCNT") % self.mscnt_quant
+                wait = m != self.mscnt_min
+
+    def stepper_align(self, target):
+        self.move(self.step_dist * 3)
+        self.intpol_wait()
+        mscnt = self.tmc.get_register("MSCNT")
+        # It works bad at cold start, move it to different position
+        if mscnt == self.mscnt_min:
+            self.move(self.step_dist * 3)
+        self.intpol_wait()
         mscnt = self.tmc.get_register("MSCNT")
         mscnt_prev = mscnt
         logging.info("MSCNT Cur: %i" % (mscnt))
         if self.dir == 0:
             self.dir = 1
             self.move(self.dir * self.step_dist)
-            toolhead.wait_moves()
+            self.intpol_wait()
             mscnt = self.tmc.get_register("MSCNT")
             if mscnt < mscnt_prev:
                 self.dir = -1
@@ -395,20 +409,16 @@ class AngleTMCCalibration:
         if fwd_distance <= bwd_distance:
             move_direction = self.dir
             steps = fwd_distance // self.mscnt_quant
-        intpol = self.tmc.fields.get_field("intpol")
+
         if (steps > 1):
             self.move(move_direction * self.step_dist * (steps - 1))
-            toolhead.wait_moves()
-            if intpol:
-                self.pause(0.1)
+            self.intpol_wait()
             logging.info("MSCNT: %i -> %i" % (mscnt, target))
             mscnt = self.tmc.get_register("MSCNT")
 
         while mscnt != target:
             self.move(move_direction * self.step_dist)
-            toolhead.wait_moves()
-            if intpol:
-                self.pause(0.1)
+            self.intpol_wait()
             logging.info("MSCNT: %i -> %i" % (mscnt, target))
             mscnt = self.tmc.get_register("MSCNT")
         logging.info("MSCNT Cur: %i" % (mscnt))
@@ -771,7 +781,7 @@ class AngleTMCCalibration:
 
     def last_move_angle(self):
         toolhead = self.printer.lookup_object('toolhead')
-        start = toolhead.get_last_move_time() + 0.050
+        start = toolhead.get_last_move_time() + 0.040
         return self.twindow_to_angle(start)
 
     def _force_disable(self):
@@ -813,31 +823,6 @@ class AngleTMCCalibration:
 
         # Allow missaligment up to 1 angle sensor step
         self.misalign = (360 / self.real_resolution) * 1.2
-
-    # Ducttape trying to debug issue with crazy driver
-    def mslut_table_validate(self):
-        sin_value = self.mslut_decoder()
-        sin_value90 = sin_value.copy()
-        sin_value90.reverse()
-        sin_value.extend(sin_value90)
-        sin_value_180 = [-i for i in sin_value]
-        sin_value.extend(sin_value_180)
-        sin_value_270 = [-i for i in sin_value90]
-        sin_value.extend(sin_value_270)
-
-        toolhead = self.printer.lookup_object('toolhead')
-        toolhead.wait_moves()
-        cur_a = self.tmc.fields.get_field("cur_a")
-        mscnt = self.tmc.fields.get_field("mscnt")
-        if sin_value[mscnt] != cur_a:
-            logging.warning("Table does not match %i: %i != %i" % (mscnt, sin_value[mscnt], cur_a))
-
-    # There is no way to reset driver or make it truly apply new mslut
-    # This is a duct tape, looks like this sequence make driver sane
-    # no way :(
-    def tmc_recalibrate(self):
-        self.move(self.full_step_dist * 8)
-        self.move(self.full_step_dist * -8)
 
     def interp(self, sin_value):
         from numpy import interp
@@ -890,15 +875,11 @@ class AngleTMCCalibration:
             return diff
 
         self.sin_apply(left)
-        # Try to allow driver recalibrate
         self.move_reset()
         self.stepper_align(self.start_offset)
-        # For incrimental tuning
         prev_angle = self.last_move_angle()
-        # Try converge to ideal steps
         ideal_angle = prev_angle + self.ms_angle * self.angle_dir
         ms_dist = []
-
 
         for pos in self.positions:
             self.move(self.dir * self.step_dist * 2)
@@ -913,12 +894,9 @@ class AngleTMCCalibration:
         left_stddev = std(ms_dist)
 
         self.sin_apply(right)
-        # Try to allow driver recalibrate
         self.move_reset()
         self.stepper_align(self.start_offset)
-        # For incrimental tuning
         prev_angle = self.last_move_angle()
-        # Try converge to ideal steps
         ideal_angle = prev_angle + self.ms_angle * self.angle_dir
         ms_dist = []
 
@@ -949,9 +927,9 @@ class AngleTMCCalibration:
         MSLUTSEL |= (mslut["W"][3] << 6) | (mslut["W"][2] << 4) | (mslut["W"][1] << 2) | (mslut["W"][0])
         self.tmc.set_register("MSLUTSEL", MSLUTSEL)
 
-        # Try to allow driver recalibrate
-        self.tmc_recalibrate()
-        self.mslut_table_validate()
+        # Force reread mslut
+        self.move(self.full_step_dist * 8)
+        self.move(self.full_step_dist * -8)
 
     cmd_ANGLE_TMC_CALIBRATE_help = "Calibrate stepper driver by angle sensor"
     def cmd_ANGLE_TMC_CALIBRATE(self, gcmd):
@@ -1018,7 +996,6 @@ class AngleTMCCalibration:
             up = 0
             down = 0
             self.move_reset()
-            self.mslut_table_validate()
             start_offset = 0 - self.mscnt_min
             self.stepper_align(start_offset)
             sin_value = self.mslut_decoder()
