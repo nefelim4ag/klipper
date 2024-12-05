@@ -871,6 +871,7 @@ class AngleTMCCalibration:
         x_new = linspace(0, 256, 256)
         y_new = p(x_new)
         if y_new[0] < 0 or y_new[-1] > 248:
+            logging.warning("fit - fallback to fit safe")
             return self.fit_safe(sin_value)
         return self.mslut_normalize(y_new)
 
@@ -878,6 +879,7 @@ class AngleTMCCalibration:
         interp = self.interp(sin_value)
         if self.mslut_encoder(interp, safe=True):
             return interp
+        logging.warning("interp - fallback to fit")
         return self.fit(sin_value)
 
     def choise_best(self, left, right):
