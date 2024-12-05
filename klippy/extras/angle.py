@@ -886,13 +886,13 @@ class AngleTMCCalibration:
             self.move(-self.dir * self.step_dist)
             pos_angle = self.last_move_angle()
 
-            distance = dist(ideal_angle, pos_angle)
+            distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
             ideal_angle += self.ms_angle * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
         left_stddev = std(ms_dist)
-        left_dist_sum = abs(min_dist) + abs(max_dist)
+        # left_dist_sum = abs(min_dist) + abs(max_dist)
 
         self.sin_apply(right)
         self.move_reset()
@@ -907,15 +907,15 @@ class AngleTMCCalibration:
             self.move(-self.dir * self.step_dist)
             pos_angle = self.last_move_angle()
 
-            distance = dist(ideal_angle, pos_angle)
+            distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
             ideal_angle += self.ms_angle * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
         right_stddev = std(ms_dist)
-        right_dist_sum = abs(min_dist) + abs(max_dist)
+        # right_dist_sum = abs(min_dist) + abs(max_dist)
 
-        if left_dist_sum < right_dist_sum:
+        if left_stddev < right_stddev:
             return left
         return right
 
@@ -935,6 +935,19 @@ class AngleTMCCalibration:
         self.move(self.full_step_dist * 8)
         self.move(self.full_step_dist * -8)
 
+    def angle_dist(self, target, actual):
+        diff = (target - actual + 180) % 360 - 180
+        if self.angle_dir > 0:
+            if target > actual:
+                return -abs(diff)
+            else:
+                return abs(diff)
+        if self.angle_dir < 0:
+            if target < actual:
+                return -abs(diff)
+            else:
+                return abs(diff)
+
     cmd_ANGLE_TMC_CALIBRATE_help = "Calibrate stepper driver by angle sensor"
     def cmd_ANGLE_TMC_CALIBRATE(self, gcmd):
         # Start data collection
@@ -949,10 +962,6 @@ class AngleTMCCalibration:
         def adist(a1, a2):
             diff = (a1 - a2 + 180) % 360 - 180
             return abs(diff)
-
-        def dist(a1, a2):
-            diff = (a1 - a2 + 180) % 360 - 180
-            return diff
 
         self.guess_real_resolution()
         fs_angle = 360 / self.full_steps
@@ -1020,7 +1029,7 @@ class AngleTMCCalibration:
                 self.move(self.dir * self.step_dist * 2)
                 self.move(-self.dir * self.step_dist)
                 pos_angle = self.last_move_angle()
-                distance = dist(ideal_angle, pos_angle)
+                distance = self.angle_dist(ideal_angle, pos_angle)
                 min_dist = min(min_dist, distance)
                 max_dist = max(max_dist, distance)
                 ms_dist.append(distance)
