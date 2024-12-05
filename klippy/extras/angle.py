@@ -924,6 +924,7 @@ class AngleTMCCalibration:
         return right
 
     def sin_apply(self, sin_new):
+        self.tmc.fields.set_field("intpol", 1)
         mslut = self.mslut_encoder(sin_new)
         # Try to reload driver to apply MSLUT*
         self._force_disable()
@@ -1004,6 +1005,7 @@ class AngleTMCCalibration:
             up = 0
             down = 0
             self.move_reset()
+            self.tmc.fields.set_field("intpol", 0)
             start_offset = 0 - self.mscnt_min
             self.stepper_align(start_offset)
             sin_value = self.mslut_decoder()
