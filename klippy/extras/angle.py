@@ -272,6 +272,19 @@ class AngleTMCCalibration:
         if self.stepper_name is None:
             # No calibration
             return
+        try:
+            from numpy import interp
+            from numpy import linspace
+            from numpy.polynomial import Polynomial
+            from numpy import std
+        except:
+            raise config.error("Angle TMC calibration requires numpy module")
+
+        self.std = std
+        self.Polynomial = Polynomial
+        self.interp = interp
+        self.linspace = linspace
+
         sconfig = config.getsection(self.stepper_name)
         sconfig.getint('microsteps', note_valid=False)
         self.tmc = self.mcu_stepper = None
@@ -812,41 +825,36 @@ class AngleTMCCalibration:
         # Allow missaligment up to 1 angle sensor step
         self.misalign = (360 / self.real_resolution) * 1.2
 
-    def interp(self, sin_value):
-        from numpy import interp
+    def sin_interp(self, sin_value):
         x = [i for i in range(self.mscnt_min, 256, self.mscnt_quant)]
         y = [sin_value[i] for i in x]
         y_i = [0] + y + [y[-1]]
         x_i = [0] + x + [255]
         y_new = [i for i in range(0, 256)]
         for i in range(0, 256):
-            y_new[i] = interp(i, x_i, y_i)
+            y_new[i] = self.interp(i, x_i, y_i)
         return self.mslut_normalize(y_new)
 
     def fit_safe(self, sin_value):
-        from numpy import linspace
-        from numpy.polynomial import Polynomial
         sin_value = sin_value[:256]
         x = [0] + [i for i in range(self.mscnt_min, 256, self.mscnt_quant)] + [255]
         y = [sin_value[i] for i in x]
-        p = Polynomial.fit(x, y, 4)
-        x_new = linspace(0, 256, 256)
+        p = self.Polynomial.fit(x, y, 4)
+        x_new = self.linspace(0, 256, 256)
         y_new = p(x_new)
         return self.mslut_normalize(y_new)
 
     def fit(self, sin_value):
-        from numpy import linspace
-        from numpy.polynomial import Polynomial
         sin_value = sin_value[:256]
         x = [i for i in range(self.mscnt_min, 256, self.mscnt_quant)]
         y = [sin_value[i] for i in x]
         logging.info(f"y = {y}")
-        p = Polynomial.fit(x, y, 4)
-        x_new = linspace(0, 256, 256)
+        p = self.Polynomial.fit(x, y, 4)
+        x_new = self.linspace(0, 256, 256)
         y_new = p(x_new)
-        if y_new[0] < 0 or y_new[0] > 3 or y_new[-1] > 248:
-            logging.warning("fit - fallback to fit safe")
-            return self.fit_safe(sin_value)
+        # if y_new[0] < 0 or y_new[0] > 3 or y_new[-1] > 248:
+        #     logging.warning("fit - fallback to fit safe")
+        #     return self.fit_safe(sin_value)
         return self.mslut_normalize(y_new)
 
     def interp_or_fit(self, sin_value):
@@ -856,10 +864,8 @@ class AngleTMCCalibration:
         logging.warning("interp - fallback to fit")
         return self.fit(sin_value)
 
-    def choise_best(self, left, right):
-        from numpy import std
-
-        self.sin_apply(left)
+    def measure_sin(self, sin):
+        self.sin_apply(sin)
         self.move_reset()
         self.stepper_align(self.start_offset)
         pos_angle = self.last_move_angle()
@@ -868,8 +874,7 @@ class AngleTMCCalibration:
         min_dist = 1
         max_dist = 0
         for pos in self.positions:
-            self.move(self.dir * self.step_dist * 2)
-            self.move(-self.dir * self.step_dist)
+            self.move(self.dir * self.step_dist)
             pos_angle = self.last_move_angle()
 
             distance = self.angle_dist(ideal_angle, pos_angle)
@@ -877,30 +882,14 @@ class AngleTMCCalibration:
             ideal_angle += self.ms_angle * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
-        left_stddev = std(ms_dist)
-        # left_dist_sum = abs(min_dist) + abs(max_dist)
 
-        self.sin_apply(right)
-        self.move_reset()
-        self.stepper_align(self.start_offset)
-        pos_angle = self.last_move_angle()
-        ideal_angle = pos_angle + self.ms_angle * self.angle_dir
-        ms_dist = []
-        min_dist = 1
-        max_dist = 0
-        for pos in self.positions:
-            self.move(self.dir * self.step_dist * 2)
-            self.move(-self.dir * self.step_dist)
-            pos_angle = self.last_move_angle()
+        return {
+            "stddev": self.std(ms_dist)
+        }
 
-            distance = self.angle_dist(ideal_angle, pos_angle)
-            ms_dist.append(distance)
-            ideal_angle = pos_angle + self.ms_angle * self.angle_dir
-            min_dist = min(min_dist, distance)
-            max_dist = max(max_dist, distance)
-        right_stddev = std(ms_dist)
-        # right_dist_sum = abs(min_dist) + abs(max_dist)
-
+    def choise_best(self, left, right):
+        left_stddev = self.measure_sin(left)["stddev"]
+        right_stddev = self.measure_sin(right)["stddev"]
         if left_stddev < right_stddev:
             return left
         return right
@@ -984,6 +973,8 @@ class AngleTMCCalibration:
             self.angle_dir = -1
 
         self.ms_angle = fs_4_diff / self.microsteps / 4
+        # Assume 1/4 is fine for large microsteps
+        self.misalign = max(self.misalign, self.ms_angle / 4)
         gcmd.respond_info("Ideal step angle: %.4f, allowed drift: %.4f" % (
             self.ms_angle, self.misalign))
 
@@ -997,7 +988,7 @@ class AngleTMCCalibration:
                 "stddev": 360
             }]
         tries = 16
-        from numpy import std
+
         while tries:
             tries -= 1
             matched = 0
@@ -1050,7 +1041,7 @@ class AngleTMCCalibration:
                     matched += 1
 
             gcmd.respond_info("Step distance Min %.6f, Max %.6f" % (min_dist, max_dist))
-            stddev = std(ms_dist)
+            stddev = self.std(ms_dist)
             gcmd.respond_info("Unaligned steps: %i, stddev: %.4f, up: %i, down: %i" % (
                 not_matched, stddev, up, down))
             improved = (max_dist < max_dist_prev or
