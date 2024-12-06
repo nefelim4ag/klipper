@@ -779,18 +779,8 @@ class AngleTMCCalibration:
 
     def last_move_angle(self):
         toolhead = self.printer.lookup_object('toolhead')
-        start = toolhead.get_last_move_time() + 0.040
+        start = toolhead.get_last_move_time() + 0.050
         return self.twindow_to_angle(start)
-
-    def _force_disable(self):
-        toolhead = self.printer.lookup_object('toolhead')
-        print_time = toolhead.get_last_move_time()
-        stepper_enable = self.printer.lookup_object('stepper_enable')
-        disable = stepper_enable.lookup_enable(self.stepper_name)
-        was_enable = disable.is_motor_enabled()
-        if was_enable:
-            disable.motor_disable(print_time)
-            toolhead.dwell(0.100)
 
     def guess_real_resolution(self):
         if self.is_finished:
@@ -921,8 +911,6 @@ class AngleTMCCalibration:
 
     def sin_apply(self, sin_new):
         mslut = self.mslut_encoder(sin_new)
-        # Try to reload driver to apply MSLUT*
-        self._force_disable()
         for i in range(0, 8):
             self.tmc.fields.set_field("mslut%i" % (i), mslut["MSLUTS"][i])
         MSLUTSTART = (mslut["START_SIN90"] << 16) | mslut["START_SIN"]
@@ -932,8 +920,11 @@ class AngleTMCCalibration:
         self.tmc.set_register("MSLUTSEL", MSLUTSEL)
 
         # Force reread mslut
+        # mslut only really applied when mscnt == 0
+        self.enable_intpol()
         self.move(self.full_step_dist * 8)
         self.move(self.full_step_dist * -8)
+        self.disable_intpol()
 
     def angle_dist(self, target, actual):
         diff = (target - actual + 180) % 360 - 180
@@ -948,15 +939,20 @@ class AngleTMCCalibration:
             else:
                 return abs(diff)
 
+    def enable_intpol(self):
+        self.intpol_wait()
+        self.tmc.fields.set_field("intpol", 1)
+
+    def disable_intpol(self):
+        self.intpol_wait()
+        self.tmc.fields.set_field("intpol", 0)
+
+
     cmd_ANGLE_TMC_CALIBRATE_help = "Calibrate stepper driver by angle sensor"
     def cmd_ANGLE_TMC_CALIBRATE(self, gcmd):
         # Start data collection
         self.is_finished = False
         self.printer.lookup_object(self.name).add_client(self.handle_batch)
-
-        # Looks like mslut only really applied when mscnt == 0
-        gcmd.respond_info("Enable interpolation")
-        self.tmc.fields.set_field("intpol", 1)
 
         # abs angle distance
         def adist(a1, a2):
