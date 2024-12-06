@@ -859,10 +859,6 @@ class AngleTMCCalibration:
     def choise_best(self, left, right):
         from numpy import std
 
-        def dist(a1, a2):
-            diff = (a1 - a2 + 180) % 360 - 180
-            return diff
-
         self.sin_apply(left)
         self.move_reset()
         self.stepper_align(self.start_offset)
@@ -878,7 +874,7 @@ class AngleTMCCalibration:
 
             distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
-            ideal_angle = pos_angle + self.ms_angle * self.angle_dir
+            ideal_angle += self.ms_angle * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
         left_stddev = std(ms_dist)
@@ -1034,7 +1030,7 @@ class AngleTMCCalibration:
                 logging.info("pos: %i, target: %.4f, actual: %.4f, distance: %.4f" % (
                     pos, ideal_angle, pos_angle, distance
                 ))
-                ideal_angle = pos_angle + self.ms_angle * self.angle_dir
+                ideal_angle += self.ms_angle * self.angle_dir
                 # Average over fullstep
                 change = 0.25
                 pos = pos % 256
