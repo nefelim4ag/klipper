@@ -909,7 +909,19 @@ class AngleTMCCalibration:
             return left
         return right
 
+    def _force_disable(self):
+        toolhead = self.printer.lookup_object('toolhead')
+        print_time = toolhead.get_last_move_time()
+        stepper_enable = self.printer.lookup_object('stepper_enable')
+        disable = stepper_enable.lookup_enable(self.stepper_name)
+        was_enable = disable.is_motor_enabled()
+        if was_enable:
+            disable.motor_disable(print_time)
+            toolhead.dwell(0.100)
+
+
     def sin_apply(self, sin_new):
+        self._force_disable()
         mslut = self.mslut_encoder(sin_new)
         for i in range(0, 8):
             self.tmc.fields.set_field("mslut%i" % (i), mslut["MSLUTS"][i])
