@@ -865,14 +865,21 @@ class AngleTMCCalibration:
         return self.fit(sin_value)
 
     def measure_sin(self, sin):
+        matched = 0
+        not_matched = 0
+        up = 0
+        down = 0
         self.sin_apply(sin)
         self.move_reset()
         self.stepper_align(self.start_offset)
         pos_angle = self.last_move_angle()
+        # Try converge to ideal steps
         ideal_angle = pos_angle + self.ms_angle * self.angle_dir
-        ms_dist = []
         min_dist = 1
         max_dist = 0
+        ms_dist = []
+        sin_up = sin.copy()
+        sin_down = sin.copy()
         for pos in self.positions:
             self.move(self.dir * self.step_dist)
             pos_angle = self.last_move_angle()
@@ -882,15 +889,37 @@ class AngleTMCCalibration:
             ideal_angle += self.ms_angle * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
+            # Average over fullstep
+            change = 0.25
+            pos = pos % 256
+            if distance < -self.misalign:
+                not_matched += 1
+                sin_up[pos] += change
+                up += 1
+            elif distance > self.misalign:
+                not_matched += 1
+                sin_down[pos] -= change
+                down += 1
+            else:
+                matched += 1
 
         return {
-            "stddev": self.std(ms_dist)
+            "stddev": self.std(ms_dist),
+            "min_dist": min_dist,
+            "max_dist": max_dist,
+            "abs_dist": abs(min_dist) + abs(max_dist),
+            "sin_up": sin_up,
+            "up": up,
+            "sin_down": sin_down,
+            "down": down,
+            "not_matched": not_matched,
+            "matched": matched
         }
 
     def choise_best(self, left, right):
-        left_stddev = self.measure_sin(left)["stddev"]
-        right_stddev = self.measure_sin(right)["stddev"]
-        if left_stddev < right_stddev:
+        left_res = self.measure_sin(left)
+        right_res = self.measure_sin(right)
+        if left_res["abs_dist"] < right_res["abs_dist"]:
             return left
         return right
 
@@ -975,89 +1004,45 @@ class AngleTMCCalibration:
         self.ms_angle = fs_4_diff / self.microsteps / 4
         # Assume 1/4 is fine for large microsteps
         self.misalign = max(self.misalign, self.ms_angle / 4)
-        gcmd.respond_info("Ideal step angle: %.4f, allowed drift: %.4f" % (
+        gcmd.respond_info(
+            "Ideal step angle: %.4f, allowed drift: %.4f" % (
             self.ms_angle, self.misalign))
-
-        min_dist_prev = 1
-        max_dist_prev = 0
-        not_matched_prev = self.microsteps
-        stddev_prev = 1
-        improved = True
         history = [{
                 "sin": [],
-                "stddev": 360
+                "stddev": 360,
+                "abs_dist": 1,
             }]
         tries = 16
 
         while tries:
             tries -= 1
-            matched = 0
-            not_matched = 0
-            up = 0
-            down = 0
-            self.move_reset()
-            start_offset = 0 - self.mscnt_min
-            self.stepper_align(start_offset)
             sin_value = self.mslut_decoder()
             history[-1]["sin"] = sin_value.copy()
-            sin_value90 = sin_value.copy()
-            sin_value90.reverse()
-            sin_value.extend(sin_value90)
-            pos_angle = self.last_move_angle()
-            # Try converge to ideal steps
-            ideal_angle = pos_angle + self.ms_angle * self.angle_dir
-            min_dist = 1
-            max_dist = 0
-            ms_dist = []
-            sin_up = sin_value.copy()
-            sin_down = sin_value.copy()
-            for pos in self.positions:
-                self.move(self.dir * self.step_dist)
-                pos_angle = self.last_move_angle()
-                distance = self.angle_dist(ideal_angle, pos_angle)
-                min_dist = min(min_dist, distance)
-                max_dist = max(max_dist, distance)
-                ms_dist.append(distance)
-                logging.info("pos: %i, target: %.4f, actual: %.4f, distance: %.4f" % (
-                    pos, ideal_angle, pos_angle, distance
-                ))
-                ideal_angle += self.ms_angle * self.angle_dir
-                # Average over fullstep
-                change = 0.25
-                pos = pos % 256
-                if distance > 1 or distance < -1:
-                    gcmd.respond_info("Driver went crazy - Abort")
-                    tries = 0
-                    break
-                if distance < -self.misalign:
-                    not_matched += 1
-                    sin_up[pos] += change
-                    up += 1
-                elif distance > self.misalign:
-                    not_matched += 1
-                    sin_down[pos] -= change
-                    down += 1
-                else:
-                    matched += 1
+            res = self.measure_sin(sin_value)
+            stddev = res["stddev"]
+            min_dist = res["min_dist"]
+            max_dist = res["max_dist"]
+            abs_dist = res["abs_dist"]
+            up = res["up"]
+            down = res["down"]
+            sin_up = res["sin_up"]
+            sin_down = res["sin_down"]
+            not_matched = res["not_matched"]
+            matched = res["matched"]
 
-            gcmd.respond_info("Step distance Min %.6f, Max %.6f" % (min_dist, max_dist))
-            stddev = self.std(ms_dist)
-            gcmd.respond_info("Unaligned steps: %i, stddev: %.4f, up: %i, down: %i" % (
-                not_matched, stddev, up, down))
-            improved = (max_dist < max_dist_prev or
-                        min_dist > min_dist_prev or
-                        not_matched < not_matched_prev or
-                        stddev < stddev_prev)
-            max_dist_prev = max_dist
-            min_dist_prev = min_dist
-            not_matched_prev = not_matched
-            stddev_prev = stddev
+            gcmd.respond_info(
+                "Step distance Min %.6f, Max %.6f, Abs: %.6f" % (
+                    min_dist, max_dist, abs_dist))
+            gcmd.respond_info(
+                "Unaligned steps: %i/%i, stddev: %.4f, up: %i, down: %i" % (
+                not_matched, not_matched + matched, stddev, up, down))
             history[-1]["stddev"] = stddev
+            history[-1]["abs_dist"] = abs_dist
             if (len(history) > 4 and
-                (history[-4]["stddev"] < history[-3]["stddev"]) and
-                (history[-3]["stddev"] < history[-2]["stddev"]) and
-                (history[-2]["stddev"] < history[-1]["stddev"])):
-                gcmd.respond_info("stddev only increasing - abort")
+                (history[-4]["abs_dist"] < history[-3]["abs_dist"]) and
+                (history[-3]["abs_dist"] < history[-2]["abs_dist"]) and
+                (history[-2]["abs_dist"] < history[-1]["abs_dist"])):
+                gcmd.respond_info("abs_dist only increasing - abort")
                 break
 
             sin_up = self.fit(sin_up)
@@ -1065,11 +1050,6 @@ class AngleTMCCalibration:
             logging.info(f"sin_up = {sin_up}")
             logging.info(f"sin_down = {sin_down}")
             sin_new = sin_down
-            # Can't converge by some reason
-            # if abs(min_dist) / 2 > max_dist:
-            #     sin_new = sin_up
-            # elif max_dist / 2 > abs(min_dist):
-            #     sin_new = sin_down
             if up > 0 and down > 0:
                 sin_new = self.choise_best(sin_up, sin_down)
             elif down == 0:
@@ -1083,6 +1063,7 @@ class AngleTMCCalibration:
             history.append({
                 "sin": sin_new,
                 "stddev": 360,
+                "abs_dist": 1,
             })
             logging.info(sin_new)
             self.sin_apply(sin_new)
