@@ -1069,8 +1069,8 @@ class AngleTMCCalibration:
                 gcmd.respond_info("stddev only increasing - abort")
                 break
 
-            sin_up = self.interp_or_fit(sin_up)
-            sin_down = self.interp_or_fit(sin_down)
+            sin_up = self.fit(sin_up)
+            sin_down = self.fit(sin_down)
             logging.info(f"sin_up = {sin_up}")
             logging.info(f"sin_down = {sin_down}")
             sin_new = sin_down
