@@ -887,6 +887,7 @@ class AngleTMCCalibration:
 
             distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
+            logging.info(f"pos: {pos}, tgt: {ideal_angle}, act: {pos_angle}, dist: {distance}")
             ideal_angle += self.ms_angle * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
