@@ -906,6 +906,7 @@ class AngleTMCCalibration:
 
         return {
             "stddev": self.std(ms_dist),
+            "ms_dist": [round(i,2) for i in ms_dist],
             "min_dist": min_dist,
             "max_dist": max_dist,
             "abs_dist": abs(min_dist) + abs(max_dist),
@@ -1021,6 +1022,7 @@ class AngleTMCCalibration:
             history[-1]["sin"] = sin_value.copy()
             res = self.measure_sin(sin_value)
             stddev = res["stddev"]
+            ms_dist = res["ms_dist"]
             min_dist = res["min_dist"]
             max_dist = res["max_dist"]
             abs_dist = res["abs_dist"]
@@ -1046,6 +1048,7 @@ class AngleTMCCalibration:
                 gcmd.respond_info("abs_dist only increasing - abort")
                 break
 
+            logging.info(f"ms_dist = {ms_dist}")
             sin_up = self.fit(sin_up)
             sin_down = self.fit(sin_down)
             logging.info(f"sin_up = {sin_up}")
