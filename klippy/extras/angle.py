@@ -890,19 +890,19 @@ class AngleTMCCalibration:
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
             # Average over fullstep
-            change = 1
-            if pos > 256:
+            change = 0.5
+            if pos > 512:
                 continue
+            pos = pos % 256
             if distance < -self.misalign:
-                not_matched += 1
                 sin_up[pos] += change
                 up += 1
             elif distance > self.misalign:
-                not_matched += 1
                 sin_down[pos] -= change
                 down += 1
             else:
                 matched += 1
+            not_matched = up + down
 
         return {
             "stddev": self.std(ms_dist),
@@ -922,8 +922,8 @@ class AngleTMCCalibration:
         left_res = self.measure_sin(left)
         right_res = self.measure_sin(right)
         if left_res["abs_dist"] < right_res["abs_dist"]:
-            return left
-        return right
+            return left, left_res
+        return right, right_res
 
     def _force_disable(self):
         toolhead = self.printer.lookup_object('toolhead')
@@ -1009,38 +1009,35 @@ class AngleTMCCalibration:
         gcmd.respond_info(
             "Ideal step angle: %.4f, allowed drift: %.4f" % (
             self.ms_angle, self.misalign))
-        history = [{
-                "sin": [],
-                "stddev": 360,
-                "abs_dist": 1,
-            }]
-        tries = 16
 
+        tries = 16
+        sin_value = self.mslut_decoder()
+        res = self.measure_sin(sin_value)
+        stddev = res["stddev"]
+        ms_dist = res["ms_dist"]
+        min_dist = res["min_dist"]
+        max_dist = res["max_dist"]
+        abs_dist = res["abs_dist"]
+        up = res["up"]
+        down = res["down"]
+        sin_up = res["sin_up"]
+        sin_down = res["sin_down"]
+        not_matched = res["not_matched"]
+        matched = res["matched"]
+        gcmd.respond_info("Initial Values")
+        history = [{
+                "sin": sin_value,
+                "stddev": stddev,
+                "abs_dist": abs_dist,
+            }]
         while tries:
             tries -= 1
-            sin_value = self.mslut_decoder()
-            history[-1]["sin"] = sin_value.copy()
-            res = self.measure_sin(sin_value)
-            stddev = res["stddev"]
-            ms_dist = res["ms_dist"]
-            min_dist = res["min_dist"]
-            max_dist = res["max_dist"]
-            abs_dist = res["abs_dist"]
-            up = res["up"]
-            down = res["down"]
-            sin_up = res["sin_up"]
-            sin_down = res["sin_down"]
-            not_matched = res["not_matched"]
-            matched = res["matched"]
-
             gcmd.respond_info(
                 "Step distance Min %.6f, Max %.6f, Abs: %.6f" % (
                     min_dist, max_dist, abs_dist))
             gcmd.respond_info(
                 "Unaligned steps: %i/%i, stddev: %.4f, up: %i, down: %i" % (
                 not_matched, not_matched + matched, stddev, up, down))
-            history[-1]["stddev"] = stddev
-            history[-1]["abs_dist"] = abs_dist
             if (len(history) > 4 and
                 (history[-4]["abs_dist"] < history[-3]["abs_dist"]) and
                 (history[-3]["abs_dist"] < history[-2]["abs_dist"]) and
@@ -1055,24 +1052,40 @@ class AngleTMCCalibration:
             logging.info(f"sin_down = {sin_down}")
             sin_new = sin_down
             if up > 0 and down > 0:
-                sin_new = self.choise_best(sin_up, sin_down)
+                sin_new, res = self.choise_best(sin_up, sin_down)
             elif down == 0:
                 sin_new = sin_up
+                res = self.measure_sin(sin_up)
+            else:
+                sin_new = sin_down
+                res = self.measure_sin(sin_down)
 
             if sin_up == sin_new:
                 gcmd.respond_info("Follow up")
             else:
                 gcmd.respond_info("Follow down")
 
+            stddev = res["stddev"]
+            ms_dist = res["ms_dist"]
+            min_dist = res["min_dist"]
+            max_dist = res["max_dist"]
+            abs_dist = res["abs_dist"]
+            up = res["up"]
+            down = res["down"]
+            sin_up = res["sin_up"]
+            sin_down = res["sin_down"]
+            not_matched = res["not_matched"]
+            matched = res["matched"]
+
             history.append({
                 "sin": sin_new,
-                "stddev": 360,
-                "abs_dist": 1,
+                "stddev": stddev,
+                "abs_dist": abs_dist,
             })
             logging.info(sin_new)
             self.sin_apply(sin_new)
 
-        best = min(history, key=lambda x: x["stddev"])
+        best = min(history, key=lambda x: x["abs_dist"])
         sin_new = best["sin"]
         mslut = self.mslut_encoder(sin_new)
         self.sin_apply(sin_new)
