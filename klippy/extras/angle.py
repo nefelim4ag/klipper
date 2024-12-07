@@ -875,7 +875,7 @@ class AngleTMCCalibration:
         self.stepper_align(self.start_offset)
         pos_angle = self.last_move_angle()
         # Try converge to ideal steps
-        ideal_angle = pos_angle + self.ms_angle * self.angle_dir
+        ideal_angle = pos_angle + self.ms_angle[0] * self.angle_dir
         min_dist = 1
         max_dist = 0
         ms_dist = []
@@ -889,7 +889,7 @@ class AngleTMCCalibration:
             distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
             logging.info(f"pos: {pos}, tgt: {ideal_angle:.3f}, act: {pos_angle:.3f}, dist: {distance:.3f}")
-            ideal_angle += self.ms_angle * self.angle_dir
+            ideal_angle += self.ms_angle[pos//256] * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
             # Average over fullstep
@@ -1014,12 +1014,13 @@ class AngleTMCCalibration:
         if fs_angles[0] > fs_angles[2]:
             self.angle_dir = -1
 
-        self.ms_angle = fs_4_diff / 4 / self.microsteps
+        self.ms_angle = [fs_diffs[0]/self.microsteps, fs_diffs[1]/self.microsteps,
+                           fs_diffs[2]/self.microsteps, fs_diffs[3]/self.microsteps]
         # Assume 1/4 is fine for large microsteps
-        self.misalign = max(self.misalign, self.ms_angle / 4)
+        self.misalign = max(self.misalign, sum(self.ms_angle)/len(self.ms_angle) / 4)
         gcmd.respond_info(
             "Ideal step angle: %.4f, allowed drift: %.4f" % (
-            self.ms_angle, self.misalign))
+            sum(self.ms_angle)/len(self.ms_angle), self.misalign))
 
         tries = 16
         sin_value = self.mslut_decoder()
