@@ -340,7 +340,7 @@ class AngleTMCCalibration:
         self.full_step_dist = self.step_dist * self.microsteps
         self.mscnt_quant = 256 // self.microsteps
         self.mscnt_min = (self.mscnt_quant // 2)
-        positions = [i for i in range(self.mscnt_min, 1024, self.mscnt_quant)]
+        positions = [i for i in range(self.mscnt_min, 256, self.mscnt_quant)]
         self.positions = positions
         self.start_offset = 0 - self.mscnt_min
 
@@ -892,9 +892,7 @@ class AngleTMCCalibration:
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
             # Average over fullstep
-            change = 0.5
-            if pos > 512:
-                continue
+            change = 1
             pos = pos % 256
             if distance < -self.misalign:
                 sin_up[pos] += change
@@ -1005,7 +1003,7 @@ class AngleTMCCalibration:
         if fs_angles[0] > fs_angles[2]:
             self.angle_dir = -1
 
-        self.ms_angle = 360 / self.full_steps / self.microsteps
+        self.ms_angle = fs_diffs[0] / self.microsteps
         # Assume 1/4 is fine for large microsteps
         self.misalign = max(self.misalign, self.ms_angle / 4)
         gcmd.respond_info(
