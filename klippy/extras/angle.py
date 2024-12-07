@@ -888,7 +888,7 @@ class AngleTMCCalibration:
 
             distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
-            logging.info(f"pos: {pos}, tgt: {ideal_angle}, act: {pos_angle}, dist: {distance}")
+            logging.info(f"pos: {pos}, tgt: {ideal_angle:.3f}, act: {pos_angle:.3f}, dist: {distance:.3f}")
             ideal_angle += self.ms_angle * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
@@ -1057,8 +1057,8 @@ class AngleTMCCalibration:
             #     break
 
             logging.info(f"ms_dist = {ms_dist}")
-            sin_up = self.interp_or_fit(sin_up)
-            sin_down = self.interp_or_fit(sin_down)
+            sin_up = self.fit(sin_up)
+            sin_down = self.fit(sin_down)
             logging.info(f"sin_up = {sin_up}")
             logging.info(f"sin_down = {sin_down}")
             sin_new = sin_down
