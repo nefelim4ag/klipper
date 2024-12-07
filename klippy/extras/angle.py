@@ -1009,7 +1009,7 @@ class AngleTMCCalibration:
         if fs_angles[0] > fs_angles[2]:
             self.angle_dir = -1
 
-        self.ms_angle = fs_diffs[0] / self.microsteps
+        self.ms_angle = (fs_diffs[0] + fs_diffs[1]) / self.microsteps
         # Assume 1/4 is fine for large microsteps
         self.misalign = max(self.misalign, self.ms_angle / 4)
         gcmd.respond_info(
