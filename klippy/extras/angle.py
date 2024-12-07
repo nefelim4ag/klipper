@@ -764,7 +764,7 @@ class AngleTMCCalibration:
                 sin_new[i] = sin_new[i-1] - 1
                 if i < 255:
                     sin_new[i+1] += d + 1
-            sin_new[i] = min(247, sin_new[i])
+            sin_new[i] = min(248, sin_new[i])
 
         return sin_new
 
@@ -1038,12 +1038,12 @@ class AngleTMCCalibration:
             gcmd.respond_info(
                 "Unaligned steps: %i/%i, stddev: %.4f, up: %i, down: %i" % (
                 not_matched, not_matched + matched, stddev, up, down))
-            if (len(history) > 4 and
-                (history[-4]["abs_dist"] < history[-3]["abs_dist"]) and
-                (history[-3]["abs_dist"] < history[-2]["abs_dist"]) and
-                (history[-2]["abs_dist"] < history[-1]["abs_dist"])):
-                gcmd.respond_info("abs_dist only increasing - abort")
-                break
+            # if (len(history) > 4 and
+            #     (history[-4]["abs_dist"] < history[-3]["abs_dist"]) and
+            #     (history[-3]["abs_dist"] < history[-2]["abs_dist"]) and
+            #     (history[-2]["abs_dist"] < history[-1]["abs_dist"])):
+            #     gcmd.respond_info("abs_dist only increasing - abort")
+            #     break
 
             logging.info(f"ms_dist = {ms_dist}")
             sin_up = self.fit(sin_up)
@@ -1082,7 +1082,6 @@ class AngleTMCCalibration:
                 "stddev": stddev,
                 "abs_dist": abs_dist,
             })
-            logging.info(sin_new)
             self.sin_apply(sin_new)
 
         best = min(history, key=lambda x: x["abs_dist"])
