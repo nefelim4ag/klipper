@@ -858,7 +858,7 @@ class AngleTMCCalibration:
         return self.mslut_normalize(y_new)
 
     def interp_or_fit(self, sin_value):
-        interp = self.interp(sin_value)
+        interp = self.sin_interp(sin_value)
         if self.mslut_encoder(interp, safe=True):
             return interp
         logging.warning("interp - fallback to fit")
