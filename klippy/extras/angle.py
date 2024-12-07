@@ -881,7 +881,8 @@ class AngleTMCCalibration:
         sin_up = sin.copy()
         sin_down = sin.copy()
         for pos in self.positions:
-            self.move(self.dir * self.step_dist)
+            self.move(self.dir * self.step_dist * 2)
+            self.move(-self.dir * self.step_dist)
             pos_angle = self.last_move_angle()
 
             distance = self.angle_dist(ideal_angle, pos_angle)
