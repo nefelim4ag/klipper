@@ -828,6 +828,7 @@ class AngleTMCCalibration:
     def sin_interp(self, sin_value):
         x = [i for i in range(self.mscnt_min, 256, self.mscnt_quant)]
         y = [sin_value[i] for i in x]
+        logging.info(f"y = {y}")
         y_i =[y[0]*y[0]/y[1]] + y + [y[-1]/(y[-2]/y[-1])]
         x_i = [0] + x + [255]
         y_new = [i for i in range(0, 256)]
@@ -891,6 +892,8 @@ class AngleTMCCalibration:
             ideal_angle += self.ms_angle * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
+            if pos > 256:
+                continue
             # Average over fullstep
             change = 1
             pos = pos % 256
@@ -1046,8 +1049,8 @@ class AngleTMCCalibration:
             #     break
 
             logging.info(f"ms_dist = {ms_dist}")
-            sin_up = self.fit(sin_up)
-            sin_down = self.fit(sin_down)
+            sin_up = self.interp_or_fit(sin_up)
+            sin_down = self.interp_or_fit(sin_down)
             logging.info(f"sin_up = {sin_up}")
             logging.info(f"sin_down = {sin_down}")
             sin_new = sin_down
