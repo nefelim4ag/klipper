@@ -895,15 +895,13 @@ class AngleTMCCalibration:
             # Average over fullstep
             change = 0.25
             if pos < 256:
-                pass
+                pos = pos % 256
             elif pos < 512:
                 pos = 256 - (pos % 256)
             elif pos < 768:
                 pos = pos % 256
-                distance = -distance
             elif pos < 1024:
                 pos = 256 - (pos % 256)
-                distance = -distance
 
             if distance < -self.misalign:
                 sin_up[pos] += change
