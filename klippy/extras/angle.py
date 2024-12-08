@@ -873,6 +873,23 @@ class AngleTMCCalibration:
         self.sin_apply(sin)
         self.move_reset()
         self.stepper_align(self.start_offset)
+        # abs angle distance
+        def adist(a1, a2):
+            diff = (a1 - a2 + 180) % 360 - 180
+            return abs(diff)
+        # Recalculate fullstep angles
+        fs_angles = {}
+        fs_diffs = []
+        for i in range(0, 5):
+            self.move(self.dir * self.full_step_dist)
+            fs_angles[i] = self.last_move_angle()
+            if i > 0:
+                adiff = adist(fs_angles[i], fs_angles[i-1])
+                fs_diffs.append(adiff)
+        self.move(-self.dir * self.full_step_dist * 5)
+        self.ms_angle = [fs_diffs[0]/self.microsteps, fs_diffs[1]/self.microsteps,
+                           fs_diffs[2]/self.microsteps, fs_diffs[3]/self.microsteps]
+
         pos_angle = self.last_move_angle()
         # Try converge to ideal steps
         ideal_angle = pos_angle + self.ms_angle[0] * self.angle_dir
@@ -882,19 +899,18 @@ class AngleTMCCalibration:
         sin_up = sin.copy()
         sin_down = sin.copy()
         for pos in self.positions:
-            self.move(self.dir * self.step_dist * 2)
-            self.move(-self.dir * self.step_dist)
+            self.move(self.dir * self.step_dist)
             pos_angle = self.last_move_angle()
 
             distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
             logging.info(f"pos: {pos}, tgt: {ideal_angle:.3f}, act: {pos_angle:.3f}, dist: {distance:.3f}")
-            ideal_angle += self.ms_angle[pos//256] * self.angle_dir
+            ideal_angle = pos_angle + self.ms_angle[pos//256] * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
             # Average over fullstep
-            change = 1
-            if pos > 256:
+            change = min(1, (abs(distance) - self.misalign) / (360/self.full_steps/256))
+            if pos > 512:
                 continue
             if pos < 256:
                 pos = pos % 256
