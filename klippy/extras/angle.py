@@ -915,7 +915,7 @@ class AngleTMCCalibration:
             max_dist = max(max_dist, distance)
             # Average over fullstep
             change = 1
-            if pos > 512:
+            if pos > 256:
                 continue
             if pos < 256:
                 pos = pos % 256
