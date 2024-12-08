@@ -892,7 +892,9 @@ class AngleTMCCalibration:
 
         pos_angle = self.last_move_angle()
         # Try converge to ideal steps
-        ideal_angle = pos_angle + self.ms_angle[0] * self.angle_dir
+        ideal_angle = pos_angle
+        logging.info(f"pos: {1024-self.mscnt_min}, tgt: {ideal_angle:.3f}, act: {pos_angle:.3f}")
+        ideal_angle += self.ms_angle[0] * self.angle_dir
         min_dist = 1
         max_dist = 0
         ms_dist = []
@@ -1016,11 +1018,12 @@ class AngleTMCCalibration:
                           self.real_resolution,
                           fs_resolution))
 
+        self.stepper_align(self.start_offset)
         # Align stepper to zero
         fs_angles = {}
         fs_diffs = []
         for i in range(0, 5):
-            self.stepper_align(0 - self.mscnt_min + 256 * i)
+            self.move(self.dir * self.full_step_dist)
             fs_angles[i] = self.last_move_angle()
             if i > 0:
                 adiff = adist(fs_angles[i], fs_angles[i-1])
@@ -1029,6 +1032,7 @@ class AngleTMCCalibration:
         gcmd.respond_info("FullStep %.1f angles: %.2f %.2f %.2f %.2f ~ %.2f" %
                           (fs_angle, fs_diffs[0], fs_diffs[1],
                            fs_diffs[2], fs_diffs[3], fs_4_diff))
+        self.move(-5 * self.dir * self.full_step_dist)
         self.angle_dir = 1
         if fs_angles[0] > fs_angles[2]:
             self.angle_dir = -1
