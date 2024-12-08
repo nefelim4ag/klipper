@@ -1055,7 +1055,7 @@ class AngleTMCCalibration:
             "Ideal step angle: %.4f, allowed drift: %.4f" % (
             sum(self.ms_angle)/len(self.ms_angle), self.misalign))
 
-        tries = 16
+        tries = 48
         sin_value = self.mslut_decoder()
         res = self.measure_sin(sin_value)
         stddev = res["stddev"]
@@ -1074,8 +1074,9 @@ class AngleTMCCalibration:
                 "sin": sin_value,
                 "stddev": stddev,
                 "abs_dist": abs_dist,
+                "not_matched": not_matched,
             }]
-        while tries:
+        while tries or not_matched == 0:
             tries -= 1
             gcmd.respond_info(
                 "Step distance Min %.6f, Max %.6f, Abs: %.6f" % (
@@ -1083,12 +1084,12 @@ class AngleTMCCalibration:
             gcmd.respond_info(
                 "Unaligned steps: %i/%i, stddev: %.4f, up: %i, down: %i" % (
                 not_matched, not_matched + matched, stddev, up, down))
-            # if (len(history) > 4 and
-            #     (history[-4]["abs_dist"] < history[-3]["abs_dist"]) and
-            #     (history[-3]["abs_dist"] < history[-2]["abs_dist"]) and
-            #     (history[-2]["abs_dist"] < history[-1]["abs_dist"])):
-            #     gcmd.respond_info("abs_dist only increasing - abort")
-            #     break
+            if (len(history) > 4 and
+                (history[-4]["abs_dist"] < history[-3]["abs_dist"]) and
+                (history[-3]["abs_dist"] < history[-2]["abs_dist"]) and
+                (history[-2]["abs_dist"] < history[-1]["abs_dist"])):
+                gcmd.respond_info("abs_dist only increasing - abort")
+                break
 
             logging.info(f"ms_dist = {ms_dist}")
             sin_up = self.interp_or_fit(sin_up)
@@ -1126,6 +1127,7 @@ class AngleTMCCalibration:
                 "sin": sin_new,
                 "stddev": stddev,
                 "abs_dist": abs_dist,
+                "not_matched": not_matched,
             })
             self.sin_apply(sin_new)
 
