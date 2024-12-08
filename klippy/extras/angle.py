@@ -906,7 +906,7 @@ class AngleTMCCalibration:
 
             distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
-            logging.info(f"pos: {pos}, tgt: {ideal_angle:.3f}, act: {pos_angle:.3f}, dist: {distance:.3f}")
+            logging.info(f"pos: {pos:4}, tgt: {ideal_angle:3.3f}, act: {pos_angle:3.3f}, dist: {distance:1.3f}, tgt_fs_angle: {fs_angles[1+pos//256]}")
             if (pos % 256) == (256 - self.mscnt_min):
                 logging.info("---")
             ideal_angle += self.ms_angle[pos//256] * self.angle_dir
