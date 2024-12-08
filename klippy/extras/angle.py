@@ -905,6 +905,8 @@ class AngleTMCCalibration:
             distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
             logging.info(f"pos: {pos}, tgt: {ideal_angle:.3f}, act: {pos_angle:.3f}, dist: {distance:.3f}")
+            if (pos % 256) == (256 - self.mscnt_min):
+                logging.info("---")
             ideal_angle += self.ms_angle[pos//256] * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
@@ -921,14 +923,15 @@ class AngleTMCCalibration:
             elif pos < 1024:
                 pos = 256 - (pos % 256)
 
-            if distance < -self.misalign:
-                sin_up[pos] += change
-                up += 1
-            elif distance > self.misalign:
-                sin_down[pos] -= change
-                down += 1
-            else:
-                matched += 1
+            if pos < 128:
+                if distance < -self.misalign:
+                    sin_up[pos] += change
+                    up += 1
+                elif distance > self.misalign:
+                    sin_down[pos] -= change
+                    down += 1
+                else:
+                    matched += 1
             not_matched = up + down
 
         return {
