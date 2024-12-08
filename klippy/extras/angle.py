@@ -904,6 +904,8 @@ class AngleTMCCalibration:
         for pos in self.positions:
             self.move(self.dir * self.step_dist)
             pos_angle = self.last_move_angle()
+            self.pause(0.1)
+            pos_angle_fwd = self.last_move_angle()
 
             distance = self.angle_dist(ideal_angle, pos_angle)
             self.move(self.dir * self.step_dist)
@@ -912,7 +914,7 @@ class AngleTMCCalibration:
             self.pause(0.1)
             pos_angle_back2 = self.last_move_angle()
             ms_dist.append(distance)
-            logging.info(f"pos: {pos:4}, tgt: {ideal_angle:3.3f}, act: {pos_angle:3.3f}, act_b: {pos_angle_back:3.3f}, act_b2: {pos_angle_back2:3.3f}, dist: {distance:1.3f}, tgt_fs_angle: {fs_angles[1+pos//256]:3.3f}")
+            logging.info(f"pos: {pos:4}, tgt: {ideal_angle:3.3f}, act: {pos_angle:3.3f}, act_fwd: {pos_angle_fwd:3.3f}, act_b: {pos_angle_back:3.3f}, act_b2: {pos_angle_back2:3.3f}, dist: {distance:1.3f}, tgt_fs_angle: {fs_angles[1+pos//256]:3.3f}")
             if (pos % 256) == (256 - self.mscnt_min):
                 logging.info("---")
             ideal_angle += self.ms_angle[pos//256] * self.angle_dir
