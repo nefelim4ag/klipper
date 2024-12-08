@@ -905,7 +905,7 @@ class AngleTMCCalibration:
             distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
             logging.info(f"pos: {pos}, tgt: {ideal_angle:.3f}, act: {pos_angle:.3f}, dist: {distance:.3f}")
-            ideal_angle = pos_angle + self.ms_angle[pos//256] * self.angle_dir
+            ideal_angle += self.ms_angle[pos//256] * self.angle_dir
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
             # Average over fullstep
