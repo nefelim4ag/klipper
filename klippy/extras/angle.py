@@ -891,12 +891,10 @@ class AngleTMCCalibration:
         self.move(-self.dir * self.full_step_dist * 4)
         self.ms_angle = [fs_diffs[0]/self.microsteps, fs_diffs[1]/self.microsteps,
                            fs_diffs[2]/self.microsteps, fs_diffs[3]/self.microsteps]
-        self.move_reset()
-        self.stepper_align(self.start_offset)
         pos_angle = self.last_move_angle()
         # Try converge to ideal steps
         ideal_angle = pos_angle
-        logging.info(f"pos: {1024-self.mscnt_min}, tgt: {ideal_angle:.3f}, act: {pos_angle:.3f}")
+        logging.info(f"pos: {1024-self.mscnt_min}, tgt: {ideal_angle:.3f}, act: {pos_angle:.3f}, fs_angle: {fs_angles[0]:3.3f}")
         ideal_angle += self.ms_angle[0] * self.angle_dir
         min_dist = 1
         max_dist = 0
@@ -909,7 +907,7 @@ class AngleTMCCalibration:
 
             distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
-            logging.info(f"pos: {pos:4}, tgt: {ideal_angle:3.3f}, act: {pos_angle:3.3f}, dist: {distance:1.3f}, tgt_fs_angle: {fs_angles[1+pos//256]}")
+            logging.info(f"pos: {pos:4}, tgt: {ideal_angle:3.3f}, act: {pos_angle:3.3f}, dist: {distance:1.3f}, tgt_fs_angle: {fs_angles[1+pos//256]:3.3f}")
             if (pos % 256) == (256 - self.mscnt_min):
                 logging.info("---")
             ideal_angle += self.ms_angle[pos//256] * self.angle_dir
@@ -928,17 +926,17 @@ class AngleTMCCalibration:
             elif pos < 1024:
                 pos = 256 - (pos % 256)
 
-            if pos < 128:
-                if distance < -self.misalign:
-                    sin_up[pos] += change
-                    up += 1
-                elif distance > self.misalign:
-                    sin_down[pos] -= change
-                    down += 1
-                else:
-                    matched += 1
-            not_matched = up + down
 
+            if distance < -self.misalign:
+                sin_up[pos] += change
+                up += 1
+            elif distance > self.misalign:
+                sin_down[pos] -= change
+                down += 1
+            else:
+                matched += 1
+
+        not_matched = up + down
         return {
             "stddev": self.std(ms_dist),
             "ms_dist": [round(i,2) for i in ms_dist],
