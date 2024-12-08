@@ -829,7 +829,7 @@ class AngleTMCCalibration:
         x = [i for i in range(self.mscnt_min, 256, self.mscnt_quant)]
         y = [sin_value[i] for i in x]
         logging.info(f"y = {y}")
-        y_i =[y[0]*y[0]/y[1]] + y + [y[-1]/(y[-2]/y[-1])]
+        y_i =[min(2,y[0]*y[0]/y[1])] + y + [y[-1]/(y[-2]/y[-1])]
         x_i = [0] + x + [255]
         y_new = [i for i in range(0, 256)]
         for i in range(0, 256):
