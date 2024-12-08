@@ -878,9 +878,11 @@ class AngleTMCCalibration:
             diff = (a1 - a2 + 180) % 360 - 180
             return abs(diff)
         # Recalculate fullstep angles
-        fs_angles = {}
+        fs_angles = {
+            0: self.last_move_angle()
+        }
         fs_diffs = []
-        for i in range(0, 5):
+        for i in range(1, 5):
             self.move(self.dir * self.full_step_dist)
             fs_angles[i] = self.last_move_angle()
             if i > 0:
@@ -1020,9 +1022,11 @@ class AngleTMCCalibration:
 
         self.stepper_align(self.start_offset)
         # Align stepper to zero
-        fs_angles = {}
+        fs_angles = {
+            0: self.last_move_angle()
+        }
         fs_diffs = []
-        for i in range(0, 5):
+        for i in range(1, 5):
             self.move(self.dir * self.full_step_dist)
             fs_angles[i] = self.last_move_angle()
             if i > 0:
