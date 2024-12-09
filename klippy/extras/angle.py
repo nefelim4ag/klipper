@@ -1050,7 +1050,7 @@ class AngleTMCCalibration:
         self.ms_angle = [fs_diffs[0]/self.microsteps, fs_diffs[1]/self.microsteps,
                            fs_diffs[2]/self.microsteps, fs_diffs[3]/self.microsteps]
         # Assume 1/4 is fine for large microsteps
-        self.misalign = max(self.misalign, sum(self.ms_angle)/len(self.ms_angle) / 4)
+        self.misalign = max(self.misalign, sum(self.ms_angle)/len(self.ms_angle) / 5)
         gcmd.respond_info(
             "Ideal step angle: %.4f, allowed drift: %.4f" % (
             sum(self.ms_angle)/len(self.ms_angle), self.misalign))
