@@ -1076,7 +1076,7 @@ class AngleTMCCalibration:
                 "abs_dist": abs_dist,
                 "not_matched": not_matched,
             }]
-        while tries or not_matched == 0:
+        while tries and not_matched > 0:
             tries -= 1
             gcmd.respond_info(
                 "Step distance Min %.6f, Max %.6f, Abs: %.6f" % (
@@ -1131,7 +1131,7 @@ class AngleTMCCalibration:
             })
             self.sin_apply(sin_new)
 
-        best = min(history, key=lambda x: x["abs_dist"])
+        best = min(history, key=lambda x: x["not_matched"])
         sin_new = best["sin"]
         mslut = self.mslut_encoder(sin_new)
         self.sin_apply(sin_new)
