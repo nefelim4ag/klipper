@@ -900,6 +900,7 @@ class AngleTMCCalibration:
         min_dist = 1
         max_dist = 0
         ms_dist = []
+        pos_dist = []
         sin_up = sin.copy()
         sin_down = sin.copy()
         for pos in self.positions:
@@ -909,6 +910,7 @@ class AngleTMCCalibration:
             self.move(self.dir * self.step_dist)
             pos_angle = self.last_move_angle()
             pos_diff = self.angle_dist(pos_angle, pos_angle_prev)
+            pos_dist.append(pos_diff)
             pos_angle_prev = pos_angle
             distance = self.angle_dist(ideal_angle, pos_angle)
             ms_dist.append(distance)
@@ -945,7 +947,7 @@ class AngleTMCCalibration:
 
         not_matched = up + down
         return {
-            "stddev": self.std(ms_dist),
+            "stddev": self.std(pos_dist),
             "ms_dist": [round(i,2) for i in ms_dist],
             "min_dist": min_dist,
             "max_dist": max_dist,
@@ -961,7 +963,7 @@ class AngleTMCCalibration:
     def choise_best(self, left, right):
         left_res = self.measure_sin(left)
         right_res = self.measure_sin(right)
-        if left_res["abs_dist"] < right_res["abs_dist"]:
+        if left_res["stddev"] < right_res["stddev"]:
             return left, left_res
         return right, right_res
 
@@ -1085,10 +1087,10 @@ class AngleTMCCalibration:
                 "Unaligned steps: %i/%i, stddev: %.4f, up: %i, down: %i" % (
                 not_matched, not_matched + matched, stddev, up, down))
             if (len(history) > 4 and
-                (history[-4]["abs_dist"] < history[-3]["abs_dist"]) and
-                (history[-3]["abs_dist"] < history[-2]["abs_dist"]) and
-                (history[-2]["abs_dist"] < history[-1]["abs_dist"])):
-                gcmd.respond_info("abs_dist only increasing - abort")
+                (history[-4]["stddev"] < history[-3]["stddev"]) and
+                (history[-3]["stddev"] < history[-2]["stddev"]) and
+                (history[-2]["stddev"] < history[-1]["stddev"])):
+                gcmd.respond_info("stddev only increasing - abort")
                 break
 
             logging.info(f"ms_dist = {ms_dist}")
