@@ -921,7 +921,7 @@ class AngleTMCCalibration:
             min_dist = min(min_dist, distance)
             max_dist = max(max_dist, distance)
             # Average over fullstep
-            change = 0.5
+            change = 1
             # if pos > 256:
             #     continue
             if pos < 256:
@@ -929,18 +929,17 @@ class AngleTMCCalibration:
             elif pos < 512:
                 continue
             elif pos < 768:
+                continue
                 pos = 256 - (pos % 256)
             elif pos < 1024:
                 continue
 
             if distance < -self.misalign:
                 up += 1
-                if pos < 256:
-                    sin_up[pos] += change
+                sin_up[pos] += change
             elif distance > self.misalign:
                 down += 1
-                if pos < 256:
-                    sin_down[pos] -= change
+                sin_down[pos] -= change
             else:
                 matched += 1
 
