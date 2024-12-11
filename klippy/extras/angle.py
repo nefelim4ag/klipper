@@ -941,7 +941,12 @@ class AngleTMCCalibration:
 
             if distance < -self.misalign:
                 up += 1
-                sin_up[pos] += change
+                if self.microsteps <= 128 and sin_up[pos-1]-sin_up[pos] == 3:
+                    # Decrease right side if left can be increased
+                    pos = 256 - (pos % 256)
+                    sin_up[pos] -= change
+                else:
+                    sin_up[pos] += change
             elif distance > self.misalign:
                 down += 1
                 sin_down[pos] -= change
