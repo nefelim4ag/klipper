@@ -836,26 +836,26 @@ class AngleTMCCalibration:
             y_new[i] = self.interp(i, x_i, y_i)
         return self.mslut_normalize(y_new)
 
-    def fit_safe(self, sin_value):
-        sin_value = sin_value[:256]
-        x = [0] + [i for i in range(self.mscnt_min, 256, self.mscnt_quant)] + [255]
-        y = [sin_value[i] for i in x]
-        p = self.Polynomial.fit(x, y, 4)
-        x_new = self.linspace(0, 256, 256)
-        y_new = p(x_new)
-        return self.mslut_normalize(y_new)
+    # def fit_safe(self, sin_value):
+    #     sin_value = sin_value[:256]
+    #     x = [0] + [i for i in range(self.mscnt_min, 256, self.mscnt_quant)] + [255]
+    #     y = [sin_value[i] for i in x]
+    #     p = self.Polynomial.fit(x, y, 4)
+    #     x_new = self.linspace(0, 256, 256)
+    #     y_new = p(x_new)
+    #     return self.mslut_normalize(y_new)
 
     def fit(self, sin_value):
         sin_value = sin_value[:256]
-        x = [i for i in range(self.mscnt_min, 256, self.mscnt_quant)]
+        x = [0] + [i for i in range(self.mscnt_min, 256, self.mscnt_quant)] + [255]
         y = [sin_value[i] for i in x]
         logging.info(f"y = {y}")
         p = self.Polynomial.fit(x, y, 4)
         x_new = self.linspace(0, 256, 256)
         y_new = p(x_new)
-        if y_new[0] < 0 or y_new[0] > 3:
-            logging.warning("fit - fallback to fit safe")
-            return self.fit_safe(sin_value)
+        # if y_new[0] < 0 or y_new[0] > 3:
+        #     logging.warning("fit - fallback to fit safe")
+        #     return self.fit_safe(sin_value)
         return self.mslut_normalize(y_new)
 
     def interp_or_fit(self, sin_value):
