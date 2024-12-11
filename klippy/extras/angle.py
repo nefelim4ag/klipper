@@ -847,8 +847,10 @@ class AngleTMCCalibration:
 
     def fit(self, sin_value):
         sin_value = sin_value[:256]
-        x = [0] + [i for i in range(self.mscnt_min, 256, self.mscnt_quant)] + [255]
+        x = [i for i in range(self.mscnt_min, 256, self.mscnt_quant)] + [255]
         y = [sin_value[i] for i in x]
+        x = [0] + x
+        y = [0] + y
         logging.info(f"y = {y}")
         p = self.Polynomial.fit(x, y, 4)
         x_new = self.linspace(0, 256, 256)
@@ -1052,8 +1054,8 @@ class AngleTMCCalibration:
 
         self.ms_angle = [fs_diffs[0]/self.microsteps, fs_diffs[1]/self.microsteps,
                            fs_diffs[2]/self.microsteps, fs_diffs[3]/self.microsteps]
-        # Assume 1/4 is fine for large microsteps
-        self.misalign = max(self.misalign, sum(self.ms_angle)/len(self.ms_angle) / 5)
+        # # Assume 1/4 is fine for large microsteps
+        # self.misalign = max(self.misalign, sum(self.ms_angle)/len(self.ms_angle) / 5)
         gcmd.respond_info(
             "Ideal step angle: %.4f, allowed drift: %.4f" % (
             sum(self.ms_angle)/len(self.ms_angle), self.misalign))
