@@ -336,6 +336,141 @@ class TMC2240CurrentHelper:
         val = self.fields.set_field("irun", irun)
         self.mcu_tmc.set_register("IHOLD_IRUN", val, print_time)
 
+######################################################################
+# TMC2240 Calibrations
+######################################################################
+
+class TMC2240PhaseOffset:
+    def __init__(self, config, mcu_tmc):
+        self.printer = config.get_printer()
+        self.config_name = config.get_name()
+        self.stepper_name = ' '.join(self.config_name.split()[1:])
+        self.mcu_tmc = mcu_tmc
+        self._fields = self.mcu_tmc.get_fields()
+        gcode = self.printer.lookup_object("gcode")
+        gcode.register_mux_command("TMC_CALIBRATE", "STEPPER", self.stepper_name,
+                                   self.cmd_TMC_CALIBRATE,
+                                   desc=self.cmd_TMC_CALIBRATE_help)
+    def get_microsteps(self):
+        configfile = self.printer.lookup_object('configfile')
+        sconfig = configfile.get_status(None)['settings']
+        stconfig = sconfig.get(self.stepper_name, {})
+        microsteps = stconfig['microsteps']
+        full_steps = stconfig['full_steps_per_rotation']
+        return microsteps, full_steps
+
+    def set_field(self, field_name, value):
+        reg_name = self._fields.lookup_register(field_name)
+        reg_val = self._fields.set_field(field_name, value)
+        self.mcu_tmc.set_register(reg_name, reg_val)
+
+    def get_field(self, field_name):
+        return self._fields.get_field(field_name)
+
+    def _get_sg4_ind(self):
+        reg = self.mcu_tmc.get_register("SG4_IND")
+        ind_a = [
+            reg & 0xFF,        # A Falling
+            (reg >> 8) & 0xFF, # A Rising
+        ]
+        ind_b = [
+            (reg >> 16) & 0xFF, # B Falling
+            (reg >> 24) & 0xFF  # B Rising
+        ]
+        return ind_a, ind_b
+
+    cmd_TMC_CALIBRATE_help = "Run TMC2240 phase offset calibration"
+    def cmd_TMC_CALIBRATE(self, gcmd):
+        fmove = self.printer.lookup_object('force_move')
+        mcu_stepper = fmove.lookup_stepper(self.stepper_name)
+        reactor = self.printer.get_reactor()
+        toolhead = self.printer.lookup_object('toolhead')
+
+        tpwmthrs = self.get_field("tpwmthrs")
+        sg4_filt_en = self.get_field("sg4_filt_en")
+        ihold = self.get_field("ihold")
+        irun = self.get_field("irun")
+        en_pwm_mode = self.get_field("en_pwm_mode")
+        intpol = self.get_field("intpol")
+        toolhead.wait_moves()
+
+        self.set_field("ihold", irun)
+        self.set_field("en_pwm_mode", 1)
+        self.set_field("tpwmthrs", 0)
+        self.set_field("sg4_filt_en", 1)
+        self.set_field("intpol", 1)
+
+        move = fmove.manual_move
+        # Move stepper back and forward and check registers
+        microsteps, full_steps = self.get_microsteps()
+        step_dist = mcu_stepper.get_step_dist()
+        full_step_dist = step_dist * microsteps
+        rotation_dist = full_steps * full_step_dist
+        mres = self.get_field("mres")
+        step_dist_256 = step_dist / (1 << mres)
+        tgt_velocity = rotation_dist * 3
+        min_velocity = (rotation_dist * 1.5)
+        threshold = int(TMC_FREQUENCY * step_dist_256 / min_velocity + .5)
+        sg4_upd_rate = 1 / (tgt_velocity * full_steps/rotation_dist)
+        offset_sin90 = self.get_field("offset_sin90")
+
+        # Run Stealth AutoTune
+        toolhead.dwell(0.200)
+        move(mcu_stepper, 2 * rotation_dist, tgt_velocity, 1000)
+        move(mcu_stepper, -4 * rotation_dist, tgt_velocity, 1000)
+        move(mcu_stepper, 2 * rotation_dist, tgt_velocity, 1000)
+        toolhead.wait_moves()
+
+        ind_a, ind_b = self._get_sg4_ind()
+        while sum(ind_b) == 0:
+            ind_a, ind_b = self._get_sg4_ind()
+            logging.info(f"ind_a: {ind_a}, ind_b: {ind_b}")
+            if sum(ind_b) == 0:
+                reactor.pause(reactor.monotonic() + 0.1)
+                continue
+
+        # ~4 seconds with ~50% of 2 RPS
+        move(mcu_stepper, 2 * rotation_dist, tgt_velocity, 1000)
+        move(mcu_stepper, -4 * rotation_dist, tgt_velocity, 1000)
+        move(mcu_stepper, 2 * rotation_dist, tgt_velocity, 1000)
+        end = reactor.monotonic() + (4 * rotation_dist / tgt_velocity)
+
+        while reactor.monotonic() < end:
+            tstep = max(1, self.mcu_tmc.get_register("TSTEP"))
+            if tstep > threshold:
+                reactor.pause(reactor.monotonic() + 0.01)
+                continue
+            ind_a, ind_b = self._get_sg4_ind()
+            logging.info(f"ind_a: {ind_a} = {sum(ind_a)}, ind_b: {ind_b} = {sum(ind_b)}")
+            # Adapt the phase offset to match the StallGuard4 results
+            # phase A (SG4_IND_0+SG4_IND_1) and B (SG4_IND_2+SG4_IND_3)
+            # If phase A value is > phase B value, increment OFFSET_SIN90,
+            # otherwise decrement.
+            # Limited to fit default SIN
+            if sum(ind_a) > sum(ind_b):
+                if offset_sin90 < 9:
+                    offset_sin90 += 1
+                self.set_field("offset_sin90", offset_sin90)
+                reactor.pause(reactor.monotonic() + sg4_upd_rate * 16)
+            elif sum(ind_a) < sum(ind_b):
+                if offset_sin90 > -10:
+                    offset_sin90 -= 1
+                self.set_field("offset_sin90", offset_sin90)
+                reactor.pause(reactor.monotonic() + sg4_upd_rate * 16)
+            else:
+                break
+
+        degree = round(90 + (90/127 * offset_sin90))
+        gcmd.respond_info(f"New offset: {offset_sin90} ~ {degree} degree")
+        toolhead.wait_moves()
+        self.set_field("ihold", ihold)
+        self.set_field("en_pwm_mode", en_pwm_mode)
+        self.set_field("tpwmthrs", tpwmthrs)
+        self.set_field("sg4_filt_en", sg4_filt_en)
+        self.set_field("intpol", intpol)
+
+        configfile = self.printer.lookup_object('configfile')
+        configfile.set(self.config_name, 'driver_OFFSET_SIN90', offset_sin90)
 
 ######################################################################
 # TMC2240 printer object
@@ -359,6 +494,7 @@ class TMC2240:
         current_helper = TMC2240CurrentHelper(config, self.mcu_tmc)
         cmdhelper = tmc.TMCCommandHelper(config, self.mcu_tmc, current_helper)
         cmdhelper.setup_register_dump(ReadRegisters)
+        self.calibraion = TMC2240PhaseOffset(config, self.mcu_tmc)
         self.get_phase_offset = cmdhelper.get_phase_offset
         self.get_status = cmdhelper.get_status
         # Setup basic register values
