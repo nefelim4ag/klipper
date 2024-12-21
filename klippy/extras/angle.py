@@ -1095,6 +1095,7 @@ class AngleTMCCalibration:
         try:
             res = self.measure_sin(sin_value)
         except Exception:
+            self.is_finished = True
             gcmd.respond_info("Something really broken here")
             return
         stddev = res["stddev"]
