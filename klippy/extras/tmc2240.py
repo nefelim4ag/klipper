@@ -437,8 +437,8 @@ class TMC2240PhaseOffset:
             offset_min = -17
 
         tries = 3
-        while tries:
-            tries = -1
+        while tries > 0:
+            tries -= 1
             # ~4 seconds with ~50% of 2 RPS
             move(mcu_stepper, 2 * rotation_dist, tgt_velocity, 1000)
             move(mcu_stepper, -4 * rotation_dist, tgt_velocity, 1000)
@@ -457,14 +457,12 @@ class TMC2240PhaseOffset:
                 # If phase A value is > phase B value, increment OFFSET_SIN90,
                 # otherwise decrement.
                 # Limited to fit default SIN
-                if sum(ind_a) > sum(ind_b):
-                    if offset_sin90 < offset_max:
-                        offset_sin90 += 1
+                if (sum(ind_a) - sum(ind_b)) > 1 and offset_sin90 < offset_max:
+                    offset_sin90 += 1
                     self.set_field("offset_sin90", offset_sin90)
                     reactor.pause(reactor.monotonic() + sg4_upd_rate * 16)
-                elif sum(ind_a) < sum(ind_b):
-                    if offset_sin90 > offset_min:
-                        offset_sin90 -= 1
+                elif (sum(ind_b) - sum(ind_a)) > 1 and offset_sin90 > offset_min:
+                    offset_sin90 -= 1
                     self.set_field("offset_sin90", offset_sin90)
                     reactor.pause(reactor.monotonic() + sg4_upd_rate * 16)
                 else:
