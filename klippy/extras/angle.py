@@ -1007,7 +1007,7 @@ class AngleTMCCalibration:
 
 
     def sin_apply(self, sin_new):
-        self._force_disable()
+        # self._force_disable()
         mslut = self.mslut_encoder(sin_new)
         for i in range(0, 8):
             reg = self.tmc.fields.set_field("mslut%i" % (i), mslut["MSLUTS"][i])
