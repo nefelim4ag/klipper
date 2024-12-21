@@ -348,6 +348,8 @@ class AngleTMCCalibration:
         reg_name = self.tmc.fields.lookup_register(field_name)
         reg_val = self.tmc.fields.set_field(field_name, value)
         self.tmc.set_register(reg_name, reg_val)
+        # Strange write errors
+        self.pause(0.1)
 
     def get_field(self, field_name):
         return self.tmc.fields.get_field(field_name)
@@ -837,6 +839,10 @@ class AngleTMCCalibration:
         x = [i for i in range(self.mscnt_min, 256, self.mscnt_quant)]
         y = [sin_value[i] for i in x]
         logging.info(f"y = {y}")
+        y_max = [y[-1]/(y[-2]/y[-1])]
+        if self.driver == "tmc2240":
+            if self.get_field("offset_sin90") < -8 or self.get_field("offset_sin90") > 8:
+                y_max = 246
         y_i =[0] + y + [y[-1]/(y[-2]/y[-1])]
         x_i = [0] + x + [255]
         y_new = [i for i in range(0, 256)]
@@ -913,6 +919,9 @@ class AngleTMCCalibration:
         pos_dist = []
         sin_up = sin.copy()
         sin_down = sin.copy()
+        stealth = False
+        if self.get_field("stealth"):
+            stealth = True
         for pos in self.positions:
             # compensate interpolation lag and backlash
             self.move(self.dir * self.step_dist * 2)
@@ -935,6 +944,8 @@ class AngleTMCCalibration:
             max_dist = max(max_dist, distance)
             # Average over fullstep
             change = 0.26
+            if stealth:
+                change = 1
             pos = pos % 256
 
             if abs(distance) > 1:
