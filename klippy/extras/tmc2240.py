@@ -438,6 +438,7 @@ class TMC2240PhaseOffset:
 
         tries = 3
         while tries:
+            tries = -1
             # ~4 seconds with ~50% of 2 RPS
             move(mcu_stepper, 2 * rotation_dist, tgt_velocity, 1000)
             move(mcu_stepper, -4 * rotation_dist, tgt_velocity, 1000)
