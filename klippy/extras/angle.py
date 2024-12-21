@@ -761,7 +761,11 @@ class AngleTMCCalibration:
         while sin_new[0] < 0:
             for i in range(0, 256):
                 sin_new[i] += 1
-
+        y_max = 248
+        if self.driver == "tmc2240":
+            y_max = 247
+            if self.get_field("offset_sin90") < -8 or self.get_field("offset_sin90") > 8:
+                y_max = 246
         for i in range(1, 256):
             d = sin_new[i] - sin_new[i-1]
             if d > 3:
@@ -772,7 +776,7 @@ class AngleTMCCalibration:
                 sin_new[i] = sin_new[i-1] - 1
                 if i < 255:
                     sin_new[i+1] += d + 1
-            sin_new[i] = min(248, sin_new[i])
+            sin_new[i] = min(y_max, sin_new[i])
 
         return sin_new
 
@@ -841,7 +845,7 @@ class AngleTMCCalibration:
         if self.driver == "tmc2240":
             if self.get_field("offset_sin90") < -8 or self.get_field("offset_sin90") > 8:
                 y_max = 246
-        y_i =[0] + y + [y[-1]/(y[-2]/y[-1])]
+        y_i =[0] + y + [y_max]
         x_i = [0] + x + [255]
         y_new = [i for i in range(0, 256)]
         for i in range(0, 256):
