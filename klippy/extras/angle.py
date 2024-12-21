@@ -1014,6 +1014,9 @@ class AngleTMCCalibration:
         self._force_disable()
         mslut = self.mslut_encoder(sin_new)
         for i in range(0, 8):
+            # TMC2240 refuse to use same value?
+            if mslut["MSLUTS"][i] == self.get_field("mslut%i" % (i)):
+                continue
             reg = self.tmc.fields.set_field("mslut%i" % (i), mslut["MSLUTS"][i])
             self.tmc.set_register("MSLUTS%i" % (i), reg)
         self.tmc.fields.set_field("start_sin", mslut["START_SIN"])
