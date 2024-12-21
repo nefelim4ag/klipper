@@ -1009,12 +1009,16 @@ class AngleTMCCalibration:
         mslut = self.mslut_encoder(sin_new)
         for i in range(0, 8):
             self.set_field("mslut%i" % (i), mslut["MSLUTS"][i])
-        self.set_field("start_sin", mslut["START_SIN"])
-        self.set_field("start_sin90", mslut["START_SIN90"])
+        self.tmc.fields.set_field("start_sin", mslut["START_SIN"])
+        MSLUTSTART = self.tmc.fields.set_field("start_sin90", mslut["START_SIN90"])
+        self.tmc.set_register("MSLUTSTART", MSLUTSTART)
         for i in (3, 2, 1):
-            self.set_field(f"x{i}", mslut["X"][i])
-        for i in (3, 2, 1, 0):
-            self.set_field(f"w{i}", mslut["W"][i])
+            f = "x" + str(i)
+            self.tmc.fields.set_field(f, mslut["X"][i])
+            f = "w" + str(i)
+            self.tmc.fields.set_field(f, mslut["W"][i])
+        MSLUTSEL = self.tmc.fields.set_field(f, mslut["W"][0])
+        self.tmc.set_register("MSLUTSEL", MSLUTSEL)
 
         # Force reread mslut
         self.move(self.full_step_dist * 8)
