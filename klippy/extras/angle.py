@@ -344,6 +344,14 @@ class AngleTMCCalibration:
         self.positions = positions
         self.start_offset = 0 - self.mscnt_min
 
+    def set_field(self, field_name, value):
+        reg_name = self.tmc.fields.lookup_register(field_name)
+        reg_val = self.tmc.fields.set_field(field_name, value)
+        self.tmc.set_register(reg_name, reg_val)
+
+    def get_field(self, field_name):
+        return self.tmc.fields.get_field(field_name)
+
     def _write_to_file(self, filename, samples):
         import os, multiprocessing
         def write_impl():
@@ -385,7 +393,7 @@ class AngleTMCCalibration:
     def intpol_wait(self):
         toolhead = self.printer.lookup_object('toolhead')
         toolhead.wait_moves()
-        intpol = self.tmc.fields.get_field("intpol")
+        intpol = self.get_field("intpol")
         if intpol:
             self.pause(0.1)
 
@@ -511,14 +519,14 @@ class AngleTMCCalibration:
 
     def mslut_decoder(self):
         MSLUTS = [
-            self.tmc.fields.get_field("mslut0"),
-            self.tmc.fields.get_field("mslut1"),
-            self.tmc.fields.get_field("mslut2"),
-            self.tmc.fields.get_field("mslut3"),
-            self.tmc.fields.get_field("mslut4"),
-            self.tmc.fields.get_field("mslut5"),
-            self.tmc.fields.get_field("mslut6"),
-            self.tmc.fields.get_field("mslut7"),
+            self.get_field("mslut0"),
+            self.get_field("mslut1"),
+            self.get_field("mslut2"),
+            self.get_field("mslut3"),
+            self.get_field("mslut4"),
+            self.get_field("mslut5"),
+            self.get_field("mslut6"),
+            self.get_field("mslut7"),
         ]
         bit_diffs = []
         for mslut in MSLUTS:
@@ -534,10 +542,10 @@ class AngleTMCCalibration:
         # %10: MSLUT entry 0, 1 select: +1, +2
         # %11: MSLUT entry 0, 1 select: +2, +3
         W = {
-            0: self.tmc.fields.get_field("w0"),
-            1: self.tmc.fields.get_field("w1"),
-            2: self.tmc.fields.get_field("w2"),
-            3: self.tmc.fields.get_field("w3")
+            0: self.get_field("w0"),
+            1: self.get_field("w1"),
+            2: self.get_field("w2"),
+            3: self.get_field("w3")
         }
         # Unused, just for inmind decoding
         # _W_lookup_table = {0: {-1, 0}, 1: {0, +1}, 2: {1, 2}, 3: {2, 3}}
@@ -555,12 +563,12 @@ class AngleTMCCalibration:
         # For defined response the values shall satisfy:
         # 0<X1<X2<X3
         X = {
-            1: self.tmc.fields.get_field("x1"),
-            2: self.tmc.fields.get_field("x2"),
-            3: self.tmc.fields.get_field("x3"),
+            1: self.get_field("x1"),
+            2: self.get_field("x2"),
+            3: self.get_field("x3"),
         }
-        START_SIN = self.tmc.fields.get_field("start_sin")
-        START_SIN90 = self.tmc.fields.get_field("start_sin90")
+        START_SIN = self.get_field("start_sin")
+        START_SIN90 = self.get_field("start_sin90")
         # START_SIN90 gives the absolute current for
         # microstep table entry at positions 256
 
@@ -989,12 +997,13 @@ class AngleTMCCalibration:
         self._force_disable()
         mslut = self.mslut_encoder(sin_new)
         for i in range(0, 8):
-            self.tmc.fields.set_field("mslut%i" % (i), mslut["MSLUTS"][i])
-        MSLUTSTART = (mslut["START_SIN90"] << 16) | mslut["START_SIN"]
-        self.tmc.set_register("MSLUTSTART", MSLUTSTART)
-        MSLUTSEL = (mslut["X"][3] << 24) | (mslut["X"][2] << 16) | (mslut["X"][1] << 8)
-        MSLUTSEL |= (mslut["W"][3] << 6) | (mslut["W"][2] << 4) | (mslut["W"][1] << 2) | (mslut["W"][0])
-        self.tmc.set_register("MSLUTSEL", MSLUTSEL)
+            self.set_field("mslut%i" % (i), mslut["MSLUTS"][i])
+        self.set_field("start_sin", mslut["START_SIN"])
+        self.set_field("start_sin90", mslut["START_SIN90"])
+        for i in (3, 2, 1):
+            self.set_field(f"x{i}", mslut["X"][i])
+        for i in (3, 2, 1, 0):
+            self.set_field(f"w{i}", mslut["W"][i])
 
         # Force reread mslut
         self.move(self.full_step_dist * 8)
@@ -1021,7 +1030,7 @@ class AngleTMCCalibration:
 
         # Looks like mslut only really applied when mscnt == 0
         gcmd.respond_info("Enable interpolation")
-        self.tmc.fields.set_field("intpol", 1)
+        self.set_field("intpol", 1)
 
         # abs angle distance
         def adist(a1, a2):
