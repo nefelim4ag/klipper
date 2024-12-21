@@ -384,7 +384,10 @@ class AngleTMCCalibration:
         move = self.printer.lookup_object('force_move').manual_move
         move_time = 0.010
         move_speed = self.full_step_dist / move_time
-        move(self.mcu_stepper, distance, move_speed, 1000)
+        if distance > self.full_step_dist:
+            move(self.mcu_stepper, distance, move_speed, 1000)
+        else:
+            move(self.mcu_stepper, distance, move_speed)
         self.return_offset -= distance
 
     def move_reset(self):
@@ -1007,9 +1010,13 @@ class AngleTMCCalibration:
 
 
     def sin_apply(self, sin_new):
-        # self._force_disable()
+        self.stepper_align(self.start_offset)
+        self._force_disable()
         mslut = self.mslut_encoder(sin_new)
         for i in range(0, 8):
+            # TMC2240 refuse to use same value?
+            if mslut["MSLUTS"][i] == self.get_field("mslut%i" % (i)):
+                continue
             reg = self.tmc.fields.set_field("mslut%i" % (i), mslut["MSLUTS"][i])
             self.tmc.set_register("MSLUTS%i" % (i), reg)
         self.tmc.fields.set_field("start_sin", mslut["START_SIN"])
@@ -1023,7 +1030,6 @@ class AngleTMCCalibration:
         MSLUTSEL = self.tmc.fields.set_field(f, mslut["W"][0])
         self.tmc.set_register("MSLUTSEL", MSLUTSEL)
         self.move(self.step_dist)
-        self.pause(0.5)
         # Force reread mslut
         self.move(self.full_step_dist * 8)
         self.move(self.full_step_dist * -8)
@@ -1096,9 +1102,10 @@ class AngleTMCCalibration:
         sin_value = self.mslut_decoder()
         try:
             res = self.measure_sin(sin_value)
-        except Exception:
+        except Exception as e:
             self.is_finished = True
             self.msgs = []
+            logging.error(e)
             gcmd.respond_info("Something really broken here")
             return
         stddev = res["stddev"]
