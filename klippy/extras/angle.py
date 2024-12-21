@@ -384,7 +384,10 @@ class AngleTMCCalibration:
         move = self.printer.lookup_object('force_move').manual_move
         move_time = 0.010
         move_speed = self.full_step_dist / move_time
-        move(self.mcu_stepper, distance, move_speed, 1000)
+        if distance > self.full_step_dist:
+            move(self.mcu_stepper, distance, move_speed, 1000)
+        else:
+            move(self.mcu_stepper, distance, move_speed)
         self.return_offset -= distance
 
     def move_reset(self):
@@ -1024,7 +1027,6 @@ class AngleTMCCalibration:
         MSLUTSEL = self.tmc.fields.set_field(f, mslut["W"][0])
         self.tmc.set_register("MSLUTSEL", MSLUTSEL)
         self.move(self.step_dist)
-        self.pause(0.5)
         # Force reread mslut
         self.move(self.full_step_dist * 8)
         self.move(self.full_step_dist * -8)
