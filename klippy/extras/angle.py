@@ -386,7 +386,7 @@ class AngleTMCCalibration:
         move = self.printer.lookup_object('force_move').manual_move
         move_time = 0.010
         move_speed = self.full_step_dist / move_time
-        move(self.mcu_stepper, distance, move_speed)
+        move(self.mcu_stepper, distance, move_speed, 1000)
         self.return_offset -= distance
 
     def move_reset(self):
