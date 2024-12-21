@@ -1015,10 +1015,9 @@ class AngleTMCCalibration:
         mslut = self.mslut_encoder(sin_new)
         for i in range(0, 8):
             # TMC2240 refuse to use same value?
-            if mslut["MSLUTS"][i] == self.get_field("mslut%i" % (i)):
-                continue
+            logging.info(f"{mslut["MSLUTS"][i]} {self.get_field("mslut%i" % (i))}")
             reg = self.tmc.fields.set_field("mslut%i" % (i), mslut["MSLUTS"][i])
-            self.tmc.set_register("MSLUTS%i" % (i), reg)
+            self.tmc.set_register("MSLUT%i" % (i), reg)
         self.tmc.fields.set_field("start_sin", mslut["START_SIN"])
         MSLUTSTART = self.tmc.fields.set_field("start_sin90", mslut["START_SIN90"])
         self.tmc.set_register("MSLUTSTART", MSLUTSTART)
