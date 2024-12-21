@@ -100,6 +100,7 @@ class TMCErrorCheck:
             self.gstat_reg_info = [0, reg_name, 0xffffffff, 0xffffffff, 0]
         else:
             self.gstat_reg_info = None
+        self._support_err_extra = True
         self.clear_gstat = True
         # Setup for DRV_STATUS query
         self.irun_field = "irun"
@@ -114,6 +115,7 @@ class TMCErrorCheck:
             self.irun_field = "cs"
             reg_name = "READRSP@RDSEL2"
             cs_actual_mask = self.fields.all_fields[reg_name]["se"]
+            self._support_err_extra = False
         err_fields = ["ot", "s2ga", "s2gb", "s2vsa", "s2vsb"]
         warn_fields = ["otpw", "t120", "t143", "t150", "t157"]
         for f in err_fields + warn_fields:
@@ -128,6 +130,11 @@ class TMCErrorCheck:
         if self.adc_temp_reg is not None:
             pheaters = self.printer.load_object(config, 'heaters')
             pheaters.register_monitor(config)
+    def _error_extra(self):
+        drv_stat = self.mcu_tmc.get_register("DRV_STATUS")
+        fmt = self.fields.pretty_format("DRV_STATUS", drv_stat)
+        logging.error("TMC '%s' DRV_STATUS: %s"
+                      % (self.stepper_name, fmt))
     def _query_register(self, reg_info, try_clear=False):
         last_value, reg_name, mask, err_mask, cs_actual_mask = reg_info
         cleared_flags = 0
@@ -144,6 +151,8 @@ class TMCErrorCheck:
                     continue
                 raise
             if val & mask != last_value & mask:
+                if self._support_err_extra:
+                    self._error_extra()
                 fmt = self.fields.pretty_format(reg_name, val)
                 logging.info("TMC '%s' reports %s", self.stepper_name, fmt)
             reg_info[0] = last_value = val
