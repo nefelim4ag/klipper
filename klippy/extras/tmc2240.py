@@ -409,7 +409,7 @@ class TMC2240PhaseOffset:
         mres = self.get_field("mres")
         step_dist_256 = step_dist / (1 << mres)
         tgt_velocity = rotation_dist * 3
-        min_velocity = (rotation_dist * 1.5)
+        min_velocity = (rotation_dist * 1.9)
         threshold = int(TMC_FREQUENCY * step_dist_256 / min_velocity + .5)
         sg4_upd_rate = 1 / (tgt_velocity * full_steps/rotation_dist)
         offset_sin90 = self.get_field("offset_sin90")
@@ -429,14 +429,10 @@ class TMC2240PhaseOffset:
                 reactor.pause(reactor.monotonic() + 0.1)
                 continue
 
-        start_sin90 = self.get_field("start_sin90")
-        offset_max = 9
-        offset_min = -10
-        if start_sin90 <= 246:
-            offset_max = 17
-            offset_min = -17
+        offset_max = 17
+        offset_min = -17
 
-        tries = 3
+        tries = 17
         while tries > 0:
             tries -= 1
             # ~4 seconds with ~50% of 2 RPS
@@ -444,6 +440,9 @@ class TMC2240PhaseOffset:
             move(mcu_stepper, -4 * rotation_dist, tgt_velocity, 1000)
             move(mcu_stepper, 2 * rotation_dist, tgt_velocity, 1000)
             end = reactor.monotonic() + (4 * rotation_dist / tgt_velocity)
+            up = 0
+            down = 0
+            unchanged = 0
 
             while reactor.monotonic() < end:
                 tstep = max(1, self.mcu_tmc.get_register("TSTEP"))
@@ -451,22 +450,30 @@ class TMC2240PhaseOffset:
                     reactor.pause(reactor.monotonic() + 0.01)
                     continue
                 ind_a, ind_b = self._get_sg4_ind()
-                logging.info(f"ind_a: {ind_a} = {sum(ind_a)}, ind_b: {ind_b} = {sum(ind_b)}")
                 # Adapt the phase offset to match the StallGuard4 results
                 # phase A (SG4_IND_0+SG4_IND_1) and B (SG4_IND_2+SG4_IND_3)
                 # If phase A value is > phase B value, increment OFFSET_SIN90,
                 # otherwise decrement.
                 # Limited to fit default SIN
-                if (sum(ind_a) - sum(ind_b)) > 1 and offset_sin90 < offset_max:
-                    offset_sin90 += 1
-                    self.set_field("offset_sin90", offset_sin90)
-                    reactor.pause(reactor.monotonic() + sg4_upd_rate * 16)
-                elif (sum(ind_b) - sum(ind_a)) > 1 and offset_sin90 > offset_min:
-                    offset_sin90 -= 1
-                    self.set_field("offset_sin90", offset_sin90)
-                    reactor.pause(reactor.monotonic() + sg4_upd_rate * 16)
+                if (sum(ind_a) - sum(ind_b)) > 1:
+                    up += 1
+                elif (sum(ind_b) - sum(ind_a)) > 1:
+                    down += 1
                 else:
-                    break
+                    unchanged += 1
+            logging.info(f"tries: {tries}")
+            logging.info(f"ind_a > ind_b: {up}")
+            logging.info(f"ind_a < ind_b: {down}")
+            logging.info(f"ind_a ~= ind_b: {unchanged}")
+            if unchanged > (up + down):
+                break
+            if up > down:
+                offset_sin90 += 1
+                self.set_field("offset_sin90", offset_sin90)
+            elif up < down:
+                offset_sin90 -= 1
+                self.set_field("offset_sin90", offset_sin90)
+
 
         degree = round(90 + (90/127 * offset_sin90))
         gcmd.respond_info(f"New offset: {offset_sin90} ~ {degree} degree")
