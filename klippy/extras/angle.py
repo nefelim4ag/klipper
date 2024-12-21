@@ -348,8 +348,6 @@ class AngleTMCCalibration:
         reg_name = self.tmc.fields.lookup_register(field_name)
         reg_val = self.tmc.fields.set_field(field_name, value)
         self.tmc.set_register(reg_name, reg_val)
-        # Strange write errors
-        self.pause(0.1)
 
     def get_field(self, field_name):
         return self.tmc.fields.get_field(field_name)
@@ -1090,7 +1088,11 @@ class AngleTMCCalibration:
 
         tries = 48
         sin_value = self.mslut_decoder()
-        res = self.measure_sin(sin_value)
+        try:
+            res = self.measure_sin(sin_value)
+        except Exception:
+            gcmd.respond_info("Something really broken here")
+            return
         stddev = res["stddev"]
         ms_dist = res["ms_dist"]
         min_dist = res["min_dist"]
