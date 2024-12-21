@@ -379,6 +379,50 @@ class TMC2240PhaseOffset:
         ]
         return ind_a, ind_b
 
+    # Migrate to compressed table
+    def apply_sin_246(self):
+        logging.info("Write compressed sin table")
+        self.set_field("mslut0", 1431655765)
+        self.set_field("mslut1", 1251289770)
+        self.set_field("mslut2", 2299677001)
+        self.set_field("mslut3", 67375240)
+        self.set_field("mslut4", 4261412864)
+        self.set_field("mslut5", 1533918174)
+        self.set_field("mslut6", 614804141)
+        self.set_field("mslut7", 2105617)
+        self._fields.set_field("start_sin", 0)
+        MSLUTSTART = self._fields.set_field("start_sin90", 246)
+        self.mcu_tmc.set_register("MSLUTSTART", MSLUTSTART)
+        self._fields.set_field("x1", 153)
+        self._fields.set_field("x2", 255)
+        self._fields.set_field("x3", 255)
+        self._fields.set_field("w0", 2)
+        self._fields.set_field("w1", 1)
+        self._fields.set_field("w2", 1)
+        MSLUTSEL = self._fields.set_field("w3", 1)
+        self.mcu_tmc.set_register("MSLUTSEL", MSLUTSEL)
+
+    def save_sin_246(self):
+        cfgname = self.config_name
+        configfile = self.printer.lookup_object('configfile')
+        configfile.set(cfgname, 'driver_MSLUT0', 1431655765)
+        configfile.set(cfgname, 'driver_MSLUT1', 1251289770)
+        configfile.set(cfgname, 'driver_MSLUT2', 2299677001)
+        configfile.set(cfgname, 'driver_MSLUT3', 67375240)
+        configfile.set(cfgname, 'driver_MSLUT4', 4261412864)
+        configfile.set(cfgname, 'driver_MSLUT5', 1533918174)
+        configfile.set(cfgname, 'driver_MSLUT6', 614804141)
+        configfile.set(cfgname, 'driver_MSLUT7', 2105617)
+        configfile.set(cfgname, 'driver_X1', 153)
+        configfile.set(cfgname, 'driver_X2', 255)
+        configfile.set(cfgname, 'driver_X3', 255)
+        configfile.set(cfgname, 'driver_W0', 2)
+        configfile.set(cfgname, 'driver_W1', 1)
+        configfile.set(cfgname, 'driver_W2', 1)
+        configfile.set(cfgname, 'driver_W3', 1)
+        configfile.set(cfgname, 'driver_START_SIN', 0)
+        configfile.set(cfgname, 'driver_START_SIN90', 246)
+
     cmd_TMC_CALIBRATE_help = "Run TMC2240 phase offset calibration"
     def cmd_TMC_CALIBRATE(self, gcmd):
         fmove = self.printer.lookup_object('force_move')
@@ -432,7 +476,8 @@ class TMC2240PhaseOffset:
         offset_max = 17
         offset_min = -17
 
-        tries = 17
+        mslut_changed = False
+        tries = 21
         while tries > 0:
             tries -= 1
             # ~4 seconds with ~50% of 2 RPS
@@ -468,12 +513,22 @@ class TMC2240PhaseOffset:
             if unchanged > (up + down):
                 break
             if up > down:
-                offset_sin90 += 1
-                self.set_field("offset_sin90", offset_sin90)
+                if offset_sin90 < offset_max:
+                    offset_sin90 += 1
+                    degree = round(90 + (90/127 * offset_sin90))
+                    gcmd.respond_info(f"Try offset: {offset_sin90} ~ {degree} degree")
+                    self.set_field("offset_sin90", offset_sin90)
             elif up < down:
-                offset_sin90 -= 1
-                self.set_field("offset_sin90", offset_sin90)
-
+                if offset_sin90 > offset_min:
+                    offset_sin90 -= 1
+                    degree = round(90 + (90/127 * offset_sin90))
+                    gcmd.respond_info(f"Try offset: {offset_sin90} ~ {degree} degree")
+                    self.set_field("offset_sin90", offset_sin90)
+            if offset_sin90 > 8 or offset_sin90 < -8:
+                if not mslut_changed:
+                    mslut_changed = True
+                    self.apply_sin_246()
+            reactor.pause(reactor.monotonic() + 0.5)
 
         degree = round(90 + (90/127 * offset_sin90))
         gcmd.respond_info(f"New offset: {offset_sin90} ~ {degree} degree")
@@ -483,7 +538,9 @@ class TMC2240PhaseOffset:
         self.set_field("tpwmthrs", tpwmthrs)
         self.set_field("sg4_filt_en", sg4_filt_en)
         self.set_field("intpol", intpol)
-
+        if mslut_changed:
+            gcmd.respond_info("Use new sin table")
+            self.save_sin_246()
         configfile = self.printer.lookup_object('configfile')
         configfile.set(self.config_name, 'driver_OFFSET_SIN90', offset_sin90)
 
