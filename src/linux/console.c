@@ -74,7 +74,7 @@ tty_writer(void *_unused)
         int len = ring_buffer_read(&outputq, buf, sizeof(buf));
         if (len == 0) {
             if (nsec < 1000000)
-                nsec += 10000;
+                nsec += 1000;
             nanosleep(&(struct timespec){.tv_nsec = nsec}, NULL);
             continue;
         }
