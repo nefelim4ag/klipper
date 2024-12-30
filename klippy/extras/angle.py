@@ -153,7 +153,7 @@ class AngleCalibration:
             raise self.printer.command_error("Driver phase not known for %s"
                                              % (self.stepper_name,))
         mcu_pos = self.mcu_stepper.get_mcu_position()
-        return (mcu_pos + mcu_phase_offset) % phases
+        return (mcu_pos + mcu_phase_offset) % phases + phases // 8
     def do_calibration_moves(self):
         move = self.printer.lookup_object('force_move').manual_move
         # Start data collection
