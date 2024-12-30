@@ -14,6 +14,7 @@
 struct digital_out_s {
     struct timer timer;
     uint32_t on_duration, off_duration, end_time;
+    uint32_t on_rem;
     struct gpio_out pin;
     uint32_t max_duration, cycle_time;
     struct move_queue_head mq;
@@ -46,6 +47,9 @@ digital_toggle_event(struct timer *timer)
     if (d->flags & DF_CHECK_END && !timer_is_before(waketime, d->end_time)) {
         // End of normal pulsing - next event loads new pwm settings
         d->timer.func = digital_load_event;
+        d->on_rem = d->end_time;
+        if (d->flags & DF_ON && timer_is_before(d->end_time, waketime))
+            d->on_rem = waketime;
         waketime = d->end_time;
     }
     d->timer.waketime = waketime;
@@ -102,6 +106,10 @@ digital_load_event(struct timer *timer)
         return SF_RESCHEDULE;
     }
     uint32_t waketime = d->timer.waketime + on_duration;
+    if (timer_is_before(d->timer.waketime, d->on_rem)
+        && timer_is_before(d->on_rem, waketime))
+        waketime = d->on_rem;
+
     if (flags & DF_CHECK_END && !timer_is_before(waketime, end_time)) {
         d->timer.waketime = end_time;
         return SF_RESCHEDULE;
