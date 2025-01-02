@@ -18,16 +18,17 @@
 #include <stdatomic.h> // atomic_store
 #include "board/irq.h" // irq_wait
 #include "board/misc.h" // console_sendf
+#include "board/pgm.h"  // READP
 #include "command.h" // command_find_block
 #include "internal.h" // console_setup
 #include "sched.h" // sched_wake_task
-#include "ringbuf.h" // SPSC ring buf
+#include "ringbuf.h"
 
 static struct pollfd main_pfd[1];
 static struct ring_buf outputq;
-static struct ring_buf inputq;
 static pthread_t main;
 static _Atomic int main_is_sleeping;
+static _Atomic int force_shutdown;
 static pthread_t reader;
 static pthread_t writer;
 #define MP_TTY_IDX   0
@@ -43,22 +44,103 @@ report_errno(char *where, int rc)
 /****************************************************************
  * Threaded IO
  ****************************************************************/
+static uint8_t receive_buf[4096];
+static int receive_pos;
+
+#define QSIZE 32
+struct fcall {
+    uint32_t args[16];
+    uint_fast16_t cmdid;
+    int ack;
+};
+struct read_queue {
+    struct fcall cq[QSIZE];
+    _Atomic int tail, head;
+};
+
+struct read_queue read_queue;
+
+static void
+reader_signal(int signal) {}
+
+void *
+console_receive_buffer(void)
+{
+    return receive_buf;
+}
+
+// Find the command handler associated with a command
+static const struct command_parser *
+command_lookup_parser(uint_fast16_t cmdid)
+{
+    if (!cmdid || cmdid >= READP(command_index_size))
+        shutdown("Invalid command");
+    return &command_index[cmdid];
+}
+
+void command_enque(uint8_t *buf, uint_fast8_t msglen) {
+    uint8_t *p = &buf[MESSAGE_HEADER_SIZE];
+    uint8_t *msgend = &buf[msglen - MESSAGE_TRAILER_SIZE];
+    int head = atomic_load(&read_queue.head);
+    while (p < msgend) {
+        uint_fast16_t cmdid = command_parse_msgid(&p);
+        const struct command_parser *cp = command_lookup_parser(cmdid);
+        p = command_parsef(p, msgend, cp, read_queue.cq[head].args);
+        if (sched_is_shutdown() && !(READP(cp->flags) & HF_IN_SHUTDOWN)) {
+            sched_report_shutdown();
+            continue;
+        }
+        // identity response
+        if (cmdid == 1) {
+            cp->func(read_queue.cq[head].args);
+            continue;
+        }
+        read_queue.cq[head].cmdid = cmdid;
+        if (p < msgend)
+            read_queue.cq[head].ack = 0;
+        else
+            read_queue.cq[head].ack = 1;
+        head = (head + 1) % QSIZE;
+        while (head == atomic_load(&read_queue.tail)) {
+            // avoid wrap
+            nanosleep(&(struct timespec){.tv_nsec = 10000}, NULL);
+        }
+        atomic_store(&read_queue.head, head);
+        if (atomic_load(&main_is_sleeping))
+            pthread_kill(main, SIGUSR1);
+    }
+}
 
 static void *
 tty_reader(void *_unused)
 {
-    static uint8_t buf[128];
+    memset(&read_queue, 0, sizeof(read_queue));
     while (1) {
-        int ret = read(main_pfd[MP_TTY_IDX].fd, buf, sizeof(buf));
+        int ret = read(main_pfd[MP_TTY_IDX].fd, &receive_buf[receive_pos],
+                       sizeof(receive_buf) - receive_pos);
         if (ret < 0) {
-            report_errno("read", ret);
+            if (errno != EWOULDBLOCK) {
+                report_errno("read", ret);
+            }
             continue;
         }
-        while (ring_buffer_available_to_write(&inputq) < ret)
-            nanosleep(&(struct timespec){.tv_nsec = 10000}, NULL);
-        ring_buffer_write(&inputq, buf, ret);
-        if (atomic_load(&main_is_sleeping))
-            pthread_kill(main, SIGUSR1);
+
+        if (ret == 15 && receive_buf[receive_pos + 14] == '\n'
+            && memcmp(&receive_buf[receive_pos], "FORCE_SHUTDOWN\n", 15) == 0)
+            atomic_store(&force_shutdown, 1);
+
+        // Find and dispatch message blocks in the input
+        int len = receive_pos + ret;
+        uint_fast8_t pop_count, msglen = len > MESSAGE_MAX ? MESSAGE_MAX : len;
+        ret = command_find_block(receive_buf, msglen, &pop_count);
+        if (ret) {
+            command_enque(receive_buf, pop_count);
+            command_send_ack();
+            len -= pop_count;
+            if (len)
+                memmove(receive_buf, &receive_buf[pop_count], len);
+        }
+        receive_pos = len;
     }
 
     return NULL;
@@ -67,18 +149,18 @@ tty_reader(void *_unused)
 static void *
 tty_writer(void *_unused)
 {
-    static uint8_t buf[128];
+    static uint8_t buf[64];
     // adjustable sleep
-    static uint32_t nsec = 1000000;
+    static uint32_t nsec = 100000;
     while (1) {
         int len = ring_buffer_read(&outputq, buf, sizeof(buf));
         if (len == 0) {
-            if (nsec < 1000000)
+            if (nsec < 100000)
                 nsec += 1000;
             nanosleep(&(struct timespec){.tv_nsec = nsec}, NULL);
             continue;
         }
-        if (nsec > 1000)
+        if (nsec > 2000)
             nsec = nsec >> 1;
 
         int ret = write(main_pfd[MP_TTY_IDX].fd, buf, len);
@@ -166,16 +248,14 @@ console_setup(char *name)
     if (ret)
         return -1;
 
-    ring_buffer_init(&inputq);
     ring_buffer_init(&outputq);
-
     main = pthread_self();
     pthread_create(&reader, NULL, tty_reader, NULL);
-    pthread_setschedparam(reader, SCHED_OTHER,
-                          &(struct sched_param){.sched_priority = 0});
+    // pthread_setschedparam(reader, SCHED_OTHER,
+    //                       &(struct sched_param){.sched_priority = 0});
     pthread_create(&writer, NULL, tty_writer, NULL);
-    pthread_setschedparam(writer, SCHED_OTHER,
-                          &(struct sched_param){.sched_priority = 0});
+    // pthread_setschedparam(writer, SCHED_OTHER,
+    //                       &(struct sched_param){.sched_priority = 0});
 
     struct sigaction act = {.sa_handler = reader_signal,
                             .sa_flags = SA_RESTART};
@@ -193,48 +273,27 @@ console_setup(char *name)
  * Console handling
  ****************************************************************/
 
-static struct task_wake console_wake;
-static uint8_t receive_buf[4096];
-static int receive_pos;
-
-static void
-reader_signal(int signal)
-{
-    sched_wake_task(&console_wake);
-}
-
-void *
-console_receive_buffer(void)
-{
-    return receive_buf;
-}
-
 // Process any incoming commands
 void
 console_task(void)
 {
-    if (!sched_check_wake(&console_wake))
-        return;
-
-    // Read data
-    int ret = ring_buffer_read(&inputq, &receive_buf[receive_pos],
-                                sizeof(receive_buf) - receive_pos);
-    if (ret == 15 && receive_buf[receive_pos+14] == '\n'
-        && memcmp(&receive_buf[receive_pos], "FORCE_SHUTDOWN\n", 15) == 0)
-        shutdown("Force shutdown command");
-
-    // Find and dispatch message blocks in the input
-    int len = receive_pos + ret;
-    uint_fast8_t pop_count, msglen = len > MESSAGE_MAX ? MESSAGE_MAX : len;
-    ret = command_find_and_dispatch(receive_buf, msglen, &pop_count);
-    if (ret) {
-        len -= pop_count;
-        if (len) {
-            memmove(receive_buf, &receive_buf[pop_count], len);
-            sched_wake_task(&console_wake);
+    int tail = atomic_load(&read_queue.tail);
+    int head = atomic_load(&read_queue.head);
+    while (tail != head) {
+        const struct command_parser *cp = command_lookup_parser(read_queue.cq[tail].cmdid);
+        void (*func)(uint32_t *) = READP(cp->func);
+        if (atomic_load(&force_shutdown))
+            shutdown("Force shutdown command");
+        func(read_queue.cq[tail].args);
+        // printf("Func id: %li\n", read_queue.cq[tail].cmdid);
+        if (read_queue.cq[tail].ack) {
+            read_queue.cq[tail].ack = 0;
         }
+        tail = (tail + 1) % QSIZE;
+        atomic_store(&read_queue.tail, tail);
+        head = atomic_load(&read_queue.head);
     }
-    receive_pos = len;
+    irq_poll();
 }
 DECL_TASK(console_task);
 
@@ -246,7 +305,7 @@ console_sendf(const struct command_encoder *ce, va_list args)
     uint8_t buf[MESSAGE_MAX];
     uint_fast8_t msglen = command_encode_and_frame(buf, ce, args);
     while (ring_buffer_available_to_write(&outputq) < msglen)
-        nanosleep(&(struct timespec){.tv_nsec = 1000}, NULL);
+        nanosleep(&(struct timespec){.tv_nsec = 5000}, NULL);
 
     // Transmit message
     ring_buffer_write(&outputq, buf, msglen);
@@ -256,10 +315,6 @@ console_sendf(const struct command_encoder *ce, va_list args)
 void
 console_sleep(void)
 {
-    if (ring_buffer_available_to_read(&inputq) > 0) {
-        sched_wake_task(&console_wake);
-        return;
-    }
     atomic_store(&main_is_sleeping, 1);
     nanosleep(&(struct timespec){.tv_nsec = 1000000}, NULL);
     atomic_store(&main_is_sleeping, 0);

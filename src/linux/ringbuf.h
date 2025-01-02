@@ -3,6 +3,7 @@
 #define RING_BUFFER_SIZE (2048 - sizeof(int) * 2)
 struct ring_buf
 {
+    _Atomic int writers;
     uint8_t buffer[RING_BUFFER_SIZE];
     _Atomic int head;
     _Atomic int tail;

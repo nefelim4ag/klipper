@@ -11,7 +11,7 @@
 #include "board/pgm.h" // READP
 #include "command.h" // DECL_COMMAND
 #include "sched.h" // sched_clear_shutdown
-
+#include "stdio.h"
 
 /****************************************************************
  * Low level allocation
@@ -360,6 +360,7 @@ command_identify(uint32_t *args)
         count = 0;
     else if (offset + count > isize)
         count = isize - offset;
+    printf("identify: offset %u, count %u\n", offset, count);
     sendf("identify_response offset=%u data=%.*s"
           , offset, count, &command_identify_data[offset]);
 }

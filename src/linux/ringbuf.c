@@ -10,6 +10,7 @@ void ring_buffer_init(struct ring_buf *rb)
 {
     atomic_store(&rb->head, 0);
     atomic_store(&rb->tail, 0);
+    atomic_store(&rb->writers, 0);
 }
 
 int ring_buffer_available_to_read(const struct ring_buf *rb)
@@ -26,6 +27,9 @@ int ring_buffer_available_to_write(const struct ring_buf *rb)
 
 int ring_buffer_write(struct ring_buf *rb, const uint8_t *data, int length)
 {
+    int expected = 0;
+    while (!atomic_compare_exchange_weak(&(rb->writers), &expected, 1));
+
     int available = ring_buffer_available_to_write(rb);
     int to_write = (length < available) ? length : available;
 
@@ -36,15 +40,15 @@ int ring_buffer_write(struct ring_buf *rb, const uint8_t *data, int length)
     }
     memcpy(&rb->buffer[head], data, first_chunk);
     head = (head + first_chunk) % RING_BUFFER_SIZE;
-    atomic_store_explicit(&rb->head, head, memory_order_release);
 
     int second_chunk = to_write - first_chunk;
     if (second_chunk > 0) {
         memcpy(&rb->buffer[0], data + first_chunk, second_chunk);
+        head = (head + second_chunk) % RING_BUFFER_SIZE;
     }
-    head = (head + second_chunk) % RING_BUFFER_SIZE;
     atomic_store_explicit(&rb->head, head, memory_order_release);
-
+    expected = 1;
+    while (!atomic_compare_exchange_weak(&(rb->writers), &expected, 0));
     return to_write;
 }
 
