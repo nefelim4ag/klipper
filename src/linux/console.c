@@ -31,6 +31,10 @@ static _Atomic int main_is_sleeping;
 static _Atomic int force_shutdown;
 static pthread_t reader;
 static pthread_t writer;
+
+pthread_mutex_t outputq_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t outputq_cond = PTHREAD_COND_INITIALIZER;
+
 #define MP_TTY_IDX   0
 
 // Report 'errno' in a message written to stderr
@@ -91,10 +95,10 @@ void command_enque(uint8_t *buf, uint_fast8_t msglen) {
             continue;
         }
         // identity response
-        if (cmdid == 1) {
-            cp->func(read_queue.cq[head].args);
-            continue;
-        }
+        // if (cmdid == 1) {
+        //     cp->func(read_queue.cq[head].args);
+        //     continue;
+        // }
         read_queue.cq[head].cmdid = cmdid;
         if (p < msgend)
             read_queue.cq[head].ack = 0;
@@ -150,22 +154,18 @@ static void *
 tty_writer(void *_unused)
 {
     static uint8_t buf[64];
-    // adjustable sleep
-    static uint32_t nsec = 100000;
     while (1) {
-        int len = ring_buffer_read(&outputq, buf, sizeof(buf));
-        if (len == 0) {
-            if (nsec < 100000)
-                nsec += 1000;
-            nanosleep(&(struct timespec){.tv_nsec = nsec}, NULL);
-            continue;
+        pthread_mutex_lock(&outputq_mutex);
+        while (ring_buffer_available_to_read(&outputq) == 0) {
+            pthread_cond_wait(&outputq_cond, &outputq_mutex);
         }
-        if (nsec > 2000)
-            nsec = nsec >> 1;
+        int len = ring_buffer_read(&outputq, buf, sizeof(buf));
+        pthread_mutex_unlock(&outputq_mutex);
 
         int ret = write(main_pfd[MP_TTY_IDX].fd, buf, len);
-        if (ret < 0)
+        if (ret < 0) {
             report_errno("write", ret);
+        }
     }
 
     return NULL;
@@ -293,7 +293,6 @@ console_task(void)
         atomic_store(&read_queue.tail, tail);
         head = atomic_load(&read_queue.head);
     }
-    irq_poll();
 }
 DECL_TASK(console_task);
 
@@ -304,12 +303,20 @@ console_sendf(const struct command_encoder *ce, va_list args)
     // Generate message
     uint8_t buf[MESSAGE_MAX];
     uint_fast8_t msglen = command_encode_and_frame(buf, ce, args);
-    while (ring_buffer_available_to_write(&outputq) < msglen)
+
+    pthread_mutex_lock(&outputq_mutex);
+    while (ring_buffer_available_to_write(&outputq) < msglen) {
+        pthread_mutex_unlock(&outputq_mutex);
         nanosleep(&(struct timespec){.tv_nsec = 5000}, NULL);
+        pthread_mutex_lock(&outputq_mutex);
+    }
 
     // Transmit message
     ring_buffer_write(&outputq, buf, msglen);
+    pthread_cond_signal(&outputq_cond);
+    pthread_mutex_unlock(&outputq_mutex);
 }
+
 
 // Sleep for the specified time or until a signal interrupts
 void
