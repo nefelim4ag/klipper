@@ -5,6 +5,8 @@
 // This file may be distributed under the terms of the GNU GPLv3 license.
 
 #include <time.h> // struct timespec
+#include <pthread.h> // pthread_create
+#include <stdio.h> // printf
 #include "autoconf.h" // CONFIG_CLOCK_FREQ
 #include "board/io.h" // readl
 #include "board/irq.h" // irq_disable
@@ -12,6 +14,7 @@
 #include "command.h" // DECL_CONSTANT
 #include "internal.h" // console_sleep
 #include "sched.h" // DECL_INIT
+
 
 // Global storage for timer handling
 static struct {
@@ -24,11 +27,11 @@ static struct {
     // Time of next software timer (also used to convert from ticks to systime)
     uint32_t next_wake_counter;
     struct timespec next_wake;
-    // Unix signal tracking
-    timer_t t_alarm;
-    sigset_t ss_alarm, ss_sleep;
+    // Block SIGALARM
+    sigset_t ss_alarm;
 } TimerInfo;
 
+static pthread_t timer_th_id;
 
 /****************************************************************
  * Timespec helpers
@@ -118,14 +121,15 @@ timer_read_time(void)
 void
 timer_kick(void)
 {
-    struct itimerspec it = { .it_interval = {0, 0}, .it_value = {0, 1} };
-    timer_settime(TimerInfo.t_alarm, TIMER_ABSTIME, &it, NULL);
+    pthread_kill(timer_th_id, SIGALRM);
 }
 
 #define TIMER_IDLE_REPEAT_COUNT 100
 #define TIMER_REPEAT_COUNT 20
 
 #define TIMER_MIN_TRY_TICKS timer_from_us(2)
+
+static pthread_spinlock_t timer_list;
 
 // Invoke timers
 static void
@@ -134,7 +138,9 @@ timer_dispatch(void)
     uint32_t repeat_count = TIMER_REPEAT_COUNT, next;
     for (;;) {
         // Run the next software timer
+        pthread_spin_lock(&timer_list);
         next = sched_timer_dispatch();
+        pthread_spin_unlock(&timer_list);
 
         repeat_count--;
         uint32_t lrt = TimerInfo.last_read_time;
@@ -162,20 +168,24 @@ timer_dispatch(void)
             diff = next - timer_read_time();
     }
 
-    // Schedule SIGALRM signal
-    struct itimerspec it;
-    it.it_interval = (struct timespec){0, 0};
-    TimerInfo.next_wake = it.it_value = timespec_from_time(next);
+    // Sleep till next timer
+    struct timespec ts;
+    TimerInfo.next_wake = timespec_from_time(next);
     TimerInfo.next_wake_counter = next;
-    TimerInfo.must_wake_timers = 0;
-    timer_settime(TimerInfo.t_alarm, TIMER_ABSTIME, &it, NULL);
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &TimerInfo.next_wake, NULL);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
 }
 
-// OS signal handler
 static void
-timer_signal(int signal)
-{
-    TimerInfo.must_wake_timers = 1;
+timer_signal(int sig) {}
+
+static void *
+timer_thread(void *_unused) {
+    while (1) {
+        timer_dispatch();
+    }
+
+    return NULL;
 }
 
 void
@@ -192,34 +202,15 @@ timer_init(void)
         report_errno("sigaddset", ret);
         return;
     }
-    // Initialize ss_sleep signal set
-    ret = sigprocmask(0, NULL, &TimerInfo.ss_sleep);
-    if (ret < 0) {
-        report_errno("sigprocmask ss_sleep", ret);
-        return;
-    }
-    ret = sigdelset(&TimerInfo.ss_sleep, SIGALRM);
-    if (ret < 0) {
-        report_errno("sigdelset", ret);
-        return;
-    }
     // Initialize timespec_to_time() and timespec_from_time()
     struct timespec curtime = timespec_read();
     TimerInfo.start_sec = curtime.tv_sec + 1;
     TimerInfo.next_wake = curtime;
     TimerInfo.next_wake_counter = timespec_to_time(curtime);
-    // Initialize t_alarm signal based timer
-    ret = timer_create(CLOCK_MONOTONIC, NULL, &TimerInfo.t_alarm);
-    if (ret < 0) {
-        report_errno("timer_create", ret);
-        return;
-    }
-    struct sigaction act = {.sa_handler = timer_signal, .sa_flags = SA_RESTART};
-    ret = sigaction(SIGALRM, &act, NULL);
-    if (ret < 0) {
-        report_errno("sigaction", ret);
-        return;
-    }
+    struct sigaction sa = {.sa_handler = timer_signal, .sa_flags = SA_RESTART};
+    sigaction(SIGALRM, &sa, NULL);
+    pthread_spin_init(&timer_list, PTHREAD_PROCESS_PRIVATE);
+    pthread_create(&timer_th_id, NULL, timer_thread, NULL);
     timer_kick();
 }
 DECL_INIT(timer_init);
@@ -256,27 +247,24 @@ irq_enable(void)
 irqstatus_t
 irq_save(void)
 {
+    pthread_spin_lock(&timer_list);
     return 0;
 }
 
 void
 irq_restore(irqstatus_t flag)
 {
+    pthread_spin_unlock(&timer_list);
 }
 
 void
 irq_wait(void)
 {
     // Must atomically sleep until signaled
-    if (!readl(&TimerInfo.must_wake_timers)) {
-        console_sleep();
-    }
-    irq_poll();
+    console_sleep();
 }
 
 void
 irq_poll(void)
 {
-    if (readl(&TimerInfo.must_wake_timers))
-        timer_dispatch();
 }

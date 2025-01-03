@@ -25,10 +25,7 @@
 
 static struct pollfd main_pfd[1];
 static struct ring_buf outputq;
-static struct ring_buf inputq;
 static pthread_t main;
-static _Atomic int main_is_sleeping;
-static pthread_t reader;
 static pthread_t writer;
 #define MP_TTY_IDX   0
 
@@ -45,42 +42,13 @@ report_errno(char *where, int rc)
  ****************************************************************/
 
 static void *
-tty_reader(void *_unused)
-{
-    static uint8_t buf[128];
-    while (1) {
-        int ret = read(main_pfd[MP_TTY_IDX].fd, buf, sizeof(buf));
-        if (ret < 0) {
-            report_errno("read", ret);
-            continue;
-        }
-        while (ring_buffer_available_to_write(&inputq) < ret)
-            nanosleep(&(struct timespec){.tv_nsec = 10000}, NULL);
-        ring_buffer_write(&inputq, buf, ret);
-        if (atomic_load(&main_is_sleeping))
-            pthread_kill(main, SIGUSR1);
-    }
-
-    return NULL;
-}
-
-static void *
 tty_writer(void *_unused)
 {
     static uint8_t buf[128];
-    // adjustable sleep
-    static uint32_t nsec = 1000000;
     while (1) {
+        printf("Wait for data to write\n");
         int len = ring_buffer_read(&outputq, buf, sizeof(buf));
-        if (len == 0) {
-            if (nsec < 1000000)
-                nsec += 1000;
-            nanosleep(&(struct timespec){.tv_nsec = nsec}, NULL);
-            continue;
-        }
-        if (nsec > 1000)
-            nsec = nsec >> 1;
-
+        printf("Write data\n");
         int ret = write(main_pfd[MP_TTY_IDX].fd, buf, len);
         if (ret < 0)
             report_errno("write", ret);
@@ -120,9 +88,6 @@ set_close_on_exec(int fd)
     return 0;
 }
 
-static void
-reader_signal(int signal);
-
 int
 console_setup(char *name)
 {
@@ -134,6 +99,9 @@ console_setup(char *name)
         report_errno("openpty", ret);
         return -1;
     }
+    ret = set_non_blocking(mfd);
+    if (ret)
+        return -1;
     ret = set_close_on_exec(mfd);
     if (ret)
         return -1;
@@ -166,25 +134,12 @@ console_setup(char *name)
     if (ret)
         return -1;
 
-    ring_buffer_init(&inputq);
     ring_buffer_init(&outputq);
 
     main = pthread_self();
-    pthread_create(&reader, NULL, tty_reader, NULL);
-    pthread_setschedparam(reader, SCHED_OTHER,
-                          &(struct sched_param){.sched_priority = 0});
     pthread_create(&writer, NULL, tty_writer, NULL);
     pthread_setschedparam(writer, SCHED_OTHER,
                           &(struct sched_param){.sched_priority = 0});
-
-    struct sigaction act = {.sa_handler = reader_signal,
-                            .sa_flags = SA_RESTART};
-    ret = sigaction(SIGUSR1, &act, NULL);
-    if (ret < 0){
-        report_errno("sigaction", ret);
-        return -1;
-    }
-
     return 0;
 }
 
@@ -196,12 +151,6 @@ console_setup(char *name)
 static struct task_wake console_wake;
 static uint8_t receive_buf[4096];
 static int receive_pos;
-
-static void
-reader_signal(int signal)
-{
-    sched_wake_task(&console_wake);
-}
 
 void *
 console_receive_buffer(void)
@@ -217,8 +166,17 @@ console_task(void)
         return;
 
     // Read data
-    int ret = ring_buffer_read(&inputq, &receive_buf[receive_pos],
-                                sizeof(receive_buf) - receive_pos);
+    int ret = read(main_pfd[MP_TTY_IDX].fd, &receive_buf[receive_pos]
+                   , sizeof(receive_buf) - receive_pos);
+    if (ret < 0) {
+        if (errno == EWOULDBLOCK) {
+            ret = 0;
+        } else {
+            report_errno("read", ret);
+            return;
+        }
+    }
+
     if (ret == 15 && receive_buf[receive_pos+14] == '\n'
         && memcmp(&receive_buf[receive_pos], "FORCE_SHUTDOWN\n", 15) == 0)
         shutdown("Force shutdown command");
@@ -245,9 +203,6 @@ console_sendf(const struct command_encoder *ce, va_list args)
     // Generate message
     uint8_t buf[MESSAGE_MAX];
     uint_fast8_t msglen = command_encode_and_frame(buf, ce, args);
-    while (ring_buffer_available_to_write(&outputq) < msglen)
-        nanosleep(&(struct timespec){.tv_nsec = 1000}, NULL);
-
     // Transmit message
     ring_buffer_write(&outputq, buf, msglen);
 }
@@ -256,11 +211,12 @@ console_sendf(const struct command_encoder *ce, va_list args)
 void
 console_sleep(void)
 {
-    if (ring_buffer_available_to_read(&inputq) > 0) {
-        sched_wake_task(&console_wake);
+    int ret = ppoll(main_pfd, ARRAY_SIZE(main_pfd), NULL, NULL);
+    if (ret <= 0) {
+        if (errno != EINTR)
+            report_errno("ppoll main_pfd", ret);
         return;
     }
-    atomic_store(&main_is_sleeping, 1);
-    nanosleep(&(struct timespec){.tv_nsec = 1000000}, NULL);
-    atomic_store(&main_is_sleeping, 0);
+    if (main_pfd[MP_TTY_IDX].revents)
+        sched_wake_task(&console_wake);
 }
