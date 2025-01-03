@@ -24,16 +24,8 @@ DECL_CONSTANT_STR("MCU", "linux");
 static int
 realtime_setup(void)
 {
-    struct sched_param sp;
-    memset(&sp, 0, sizeof(sp));
-    sp.sched_priority = sched_get_priority_max(SCHED_FIFO) / 2;
-    int ret = sched_setscheduler(0, SCHED_FIFO, &sp);
-    if (ret < 0) {
-        report_errno("sched_setscheduler", ret);
-        return -1;
-    }
     // Lock ourselves into memory
-    ret = mlockall(MCL_CURRENT | MCL_FUTURE);
+    int ret = mlockall(MCL_CURRENT | MCL_FUTURE);
     if (ret) {
         report_errno("mlockall", ret);
         return -1;
