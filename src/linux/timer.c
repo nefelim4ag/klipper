@@ -174,6 +174,8 @@ timer_dispatch(void)
     TimerInfo.next_wake_counter = next;
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &TimerInfo.next_wake, NULL);
     clock_gettime(CLOCK_MONOTONIC, &ts);
+    printf("Wakeup %li s, %li ns\nExpect %li s, %li ns\n",
+        ts.tv_sec, ts.tv_nsec, TimerInfo.next_wake.tv_sec, TimerInfo.next_wake.tv_nsec);
 }
 
 static void

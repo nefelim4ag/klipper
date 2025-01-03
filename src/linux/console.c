@@ -21,12 +21,8 @@
 #include "command.h" // command_find_block
 #include "internal.h" // console_setup
 #include "sched.h" // sched_wake_task
-#include "ringbuf.h" // SPSC ring buf
 
 static struct pollfd main_pfd[1];
-static struct ring_buf outputq;
-static pthread_t main;
-static pthread_t writer;
 #define MP_TTY_IDX   0
 
 // Report 'errno' in a message written to stderr
@@ -35,26 +31,6 @@ report_errno(char *where, int rc)
 {
     int e = errno;
     fprintf(stderr, "Got error %d in %s: (%d)%s\n", rc, where, e, strerror(e));
-}
-
-/****************************************************************
- * Threaded IO
- ****************************************************************/
-
-static void *
-tty_writer(void *_unused)
-{
-    static uint8_t buf[128];
-    while (1) {
-        printf("Wait for data to write\n");
-        int len = ring_buffer_read(&outputq, buf, sizeof(buf));
-        printf("Write data\n");
-        int ret = write(main_pfd[MP_TTY_IDX].fd, buf, len);
-        if (ret < 0)
-            report_errno("write", ret);
-    }
-
-    return NULL;
 }
 
 /****************************************************************
@@ -133,13 +109,6 @@ console_setup(char *name)
     ret = set_non_blocking(STDERR_FILENO);
     if (ret)
         return -1;
-
-    ring_buffer_init(&outputq);
-
-    main = pthread_self();
-    pthread_create(&writer, NULL, tty_writer, NULL);
-    pthread_setschedparam(writer, SCHED_OTHER,
-                          &(struct sched_param){.sched_priority = 0});
     return 0;
 }
 
@@ -204,7 +173,9 @@ console_sendf(const struct command_encoder *ce, va_list args)
     uint8_t buf[MESSAGE_MAX];
     uint_fast8_t msglen = command_encode_and_frame(buf, ce, args);
     // Transmit message
-    ring_buffer_write(&outputq, buf, msglen);
+    int ret = write(main_pfd[MP_TTY_IDX].fd, buf, msglen);
+    if (ret < 0)
+        report_errno("write", ret);
 }
 
 // Sleep for the specified time or until a signal interrupts
