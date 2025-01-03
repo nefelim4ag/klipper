@@ -4,6 +4,7 @@
 //
 // This file may be distributed under the terms of the GNU GPLv3 license.
 
+#include <errno.h> // errno
 #include <time.h> // struct timespec
 #include <pthread.h> // pthread_create
 #include <stdio.h> // printf
@@ -125,13 +126,37 @@ timer_kick(void)
     pthread_kill(timer_th_id, SIGALRM);
 }
 
+static _Atomic int irq_disabled = 0;
+
+static pthread_mutex_t timer_list = PTHREAD_MUTEX_INITIALIZER;
+static void timer_lock(int _unused)
+{
+    pthread_mutex_lock(&timer_list);
+}
+
+static void timer_unlock(int _unused)
+{
+    pthread_mutex_unlock(&timer_list);
+}
+
 #define TIMER_IDLE_REPEAT_COUNT 100
 #define TIMER_REPEAT_COUNT 20
 
-#define TIMER_MIN_TRY_TICKS timer_from_us(5)
-
-static pthread_mutex_t timer_list = PTHREAD_MUTEX_INITIALIZER;
-static _Atomic int irq_enabled = 1;
+// Try account for scheduler latency
+static int ns_correction = 2000;
+#define TIMER_MIN_TRY_TICKS timer_from_us(ns_correction/1000)
+static void
+correction_calc(struct timespec exp, struct timespec act) {
+    int64_t e = exp.tv_sec * 1000000000;
+    int64_t a = act.tv_sec * 1000000000;
+    e += exp.tv_nsec;
+    a += act.tv_nsec;
+    int64_t diff = a - e;
+    ns_correction += diff / 8;
+    // printf("Expect: %li s, %li ns\nActual: %li s, %li ns - Diff: %li, corection: %i\n",
+    //        exp.tv_sec, exp.tv_nsec,
+    //        act.tv_sec, act.tv_nsec, diff, ns_correction);
+}
 
 // Invoke timers
 static void
@@ -140,9 +165,10 @@ timer_dispatch(void)
     uint32_t repeat_count = TIMER_REPEAT_COUNT, next;
     for (;;) {
         // Run the next software timer
-        pthread_mutex_lock(&timer_list);
+        timer_lock(1);
         next = sched_timer_dispatch();
-        pthread_mutex_unlock(&timer_list);
+        timer_unlock(1);
+        while (atomic_load(&irq_disabled));
 
         repeat_count--;
         uint32_t lrt = TimerInfo.last_read_time;
@@ -173,10 +199,20 @@ timer_dispatch(void)
     // Sleep till next timer
     TimerInfo.next_wake = timespec_from_time(next);
     TimerInfo.next_wake_counter = next;
-    if (TimerInfo.next_wake.tv_nsec > 5000) {
-        TimerInfo.next_wake.tv_nsec -= 5000;
+    struct timespec corrected_wake = TimerInfo.next_wake;
+    if (corrected_wake.tv_nsec >= ns_correction) {
+        corrected_wake.tv_nsec -= ns_correction;
+    } else {
+        corrected_wake.tv_sec -= 1;
+        corrected_wake.tv_nsec = 1000000000 + corrected_wake.tv_nsec - ns_correction;
     }
-    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &TimerInfo.next_wake, NULL);
+    int ret = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
+                              &corrected_wake, NULL);
+    if (ret == EINTR)
+        return;
+
+    struct timespec ts = timespec_read();
+    correction_calc(TimerInfo.next_wake, ts);
 }
 
 static void
@@ -246,24 +282,26 @@ timer_enable_signals(void)
 void
 irq_disable(void)
 {
+    atomic_store(&irq_disabled, 1);
 }
 
 void
 irq_enable(void)
 {
+    atomic_store(&irq_disabled, 0);
 }
 
 irqstatus_t
 irq_save(void)
 {
-    pthread_mutex_lock(&timer_list);
+    timer_lock(2);
     return 0;
 }
 
 void
 irq_restore(irqstatus_t flag)
 {
-    pthread_mutex_unlock(&timer_list);
+    timer_unlock(2);
 }
 
 void
