@@ -127,7 +127,7 @@ timer_kick(void)
 #define TIMER_IDLE_REPEAT_COUNT 100
 #define TIMER_REPEAT_COUNT 20
 
-#define TIMER_MIN_TRY_TICKS timer_from_us(2)
+#define TIMER_MIN_TRY_TICKS timer_from_us(5)
 
 static pthread_spinlock_t timer_list;
 
