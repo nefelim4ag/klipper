@@ -127,6 +127,8 @@ timer_kick(void)
 }
 
 static _Atomic int irq_disabled = 0;
+static pthread_t main;
+static _Atomic int tasks_is_sleeping = 0;
 
 static pthread_mutex_t timer_list = PTHREAD_MUTEX_INITIALIZER;
 static void timer_lock(int _unused)
@@ -163,12 +165,12 @@ static void
 timer_dispatch(void)
 {
     uint32_t repeat_count = TIMER_REPEAT_COUNT, next;
+    pthread_kill(main, SIGALRM);
     for (;;) {
         // Run the next software timer
         timer_lock(1);
         next = sched_timer_dispatch();
         timer_unlock(1);
-        while (atomic_load(&irq_disabled));
 
         repeat_count--;
         uint32_t lrt = TimerInfo.last_read_time;
@@ -248,6 +250,7 @@ timer_init(void)
     TimerInfo.next_wake_counter = timespec_to_time(curtime);
     struct sigaction sa = {.sa_handler = timer_signal, .sa_flags = SA_RESTART};
     sigaction(SIGALRM, &sa, NULL);
+    main = pthread_self();
     pthread_create(&timer_th_id, NULL, timer_thread, NULL);
     int prio = sched_get_priority_max(SCHED_FIFO) / 2;
     ret = pthread_setschedparam(timer_th_id, SCHED_FIFO,
@@ -308,7 +311,9 @@ void
 irq_wait(void)
 {
     // Must atomically sleep until signaled
+    atomic_store(&tasks_is_sleeping, 1);
     console_sleep();
+    atomic_store(&tasks_is_sleeping, 0);
 }
 
 void
