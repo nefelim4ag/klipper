@@ -379,15 +379,24 @@ queue_flush(struct stepcompress *sc, uint64_t move_clock)
 {
     if (sc->queue_pos >= sc->queue_next)
         return 0;
+    uint32_t *shaper_pos = stepper_shaper(sc->oid, sc->queue_pos, sc->queue_next, sc->last_step_clock, move_clock, sc->sdir);
     while (sc->last_step_clock < move_clock) {
         struct step_move move = compress_bisect_add(sc);
         int ret = check_line(sc, move);
         if (ret)
             return ret;
-
         add_move(sc, sc->last_step_clock + move.interval, &move);
 
+        // compress bisect can compress more than move_clock, but less then or equal to queue_next
+        while (shaper_pos < sc->queue_pos + move.count) {
+            stepper_shaper_far(sc->oid, sc->sdir);
+            shaper_pos++;
+        }
+
         if (sc->queue_pos + move.count >= sc->queue_next) {
+            uint32_t diff = sc->queue_pos + move.count - sc->queue_next;
+            while (diff--)
+                stepper_shaper_far(sc->oid, sc->sdir);
             sc->queue_pos = sc->queue_next = sc->queue;
             break;
         }
@@ -402,6 +411,7 @@ static int
 stepcompress_flush_far(struct stepcompress *sc, uint64_t abs_step_clock)
 {
     struct step_move move = { abs_step_clock - sc->last_step_clock, 1, 0 };
+    stepper_shaper_far(sc->oid, sc->sdir);
     add_move(sc, abs_step_clock, &move);
     calc_last_step_print_time(sc);
     return 0;
