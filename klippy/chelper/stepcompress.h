@@ -45,4 +45,7 @@ void steppersync_set_time(struct steppersync *ss, double time_offset
 int steppersync_flush(struct steppersync *ss, uint64_t move_clock
                       , uint64_t clear_history_clock);
 
+uint32_t *stepper_shaper(uint32_t oid, uint32_t *queue_pos, uint32_t *queue_next, uint64_t last_step_clock, uint64_t move_clock, int sdir);
+void stepper_shaper_far(uint32_t oid, int sdir);
+
 #endif // stepcompress.h
