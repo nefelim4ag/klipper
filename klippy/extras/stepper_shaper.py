@@ -10,9 +10,10 @@ class StepperShaper:
         self.printer.register_event_handler("klippy:connect", self.connect)
         self.stepper_name = config.get('stepper', None)
         self.period = config.getint('period', 0, minval=0, maxval=1024)
-        self.offset = config.getint('offset', self.period // 2,
+        self.offset = config.getint('offset', 0,
                                     minval=0, maxval=self.period)
-        self.amplitude = config.getfloat('amplitude', 10)
+        self.rotations = config.getint('rotations', 0, minval=0, maxval=4)
+        self.amplitude = config.getint('amplitude', 10)
         self.tmc = None
         self.microsteps = 0
         # Register gcode commands
@@ -65,7 +66,7 @@ class StepperShaper:
         stepper = self.get_stepper()
         oid = stepper.get_oid()
         mscnt = self.tmc.get_register("MSCNT")
-        ffi_lib.stepper_set_shaper_params(oid, mscnt, 256//self.microsteps, self.period, self.offset, self.amplitude)
+        ffi_lib.stepper_set_shaper_params(oid, mscnt, 256//self.microsteps, self.period, self.offset, self.rotations, self.amplitude)
 
     def handle_homing_move_end(self, hmoves):
         logging.info("Pausing toolhead to reset %s offset",
@@ -87,6 +88,9 @@ class StepperShaper:
         self.offset = gcmd.get_int('OFFSET',
                                    period//2,
                                    minval=0, maxval=period)
+        self.rotations = gcmd.get_int('ROTS',
+                                   self.rotations,
+                                   minval=0, maxval=4)
         self.period = period
         self.stepper_set_shaper_params()
     cmd_GET_STEPPER_SHAPER_help = "Set stepper shaper params"

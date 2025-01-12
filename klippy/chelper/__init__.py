@@ -159,7 +159,8 @@ defs_kin_shaper = """
 
 defs_kin_shaper_stepper = """
     int stepper_set_shaper_params(uint32_t oid, int mscnt, int msteps,
-                                  int period, int offset, int amplitude);
+                                  int period, int offset, int rotations,
+                                  int amplitude);
     int stepper_get_shaper_mscnt(uint32_t oid);
 """
 
