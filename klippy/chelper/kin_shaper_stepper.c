@@ -13,6 +13,7 @@
 #include "trapq.h"     // struct move
 #include "pyhelper.h"  // errorf
 #include "stdio.h"
+#include <math.h>
 
 struct tracker {
     uint16_t mscnt;
@@ -27,9 +28,9 @@ struct tracker {
 static struct tracker steppers[64];
 
 int __visible
-stepper_set_shaper_params(uint32_t oid, int mscnt, int msteps, int period, int offset, int amplitude)
+stepper_set_shaper_params(uint32_t oid, int mscnt, int msteps, int period, int offset, int rotations, int amplitude)
 {
-    if (oid >= 16) {
+    if (oid >= 64) {
         errorf("stepper shaper oid %d > MAX", oid);
         return -1;
     }
@@ -53,11 +54,10 @@ stepper_set_shaper_params(uint32_t oid, int mscnt, int msteps, int period, int o
     fprintf(file, "offset: %i -> %i\n", offset, offset / msteps);
     offset = offset / msteps;
     fprintf(file, "period: %i -> %i\n", period, N);
-    float amp = (float)(amplitude) / 100;
+    float amp = (float)(amplitude) / 1000;
     for (int i = 0; i < N; i++) {
-        // Normalize i to [-1, 1]
-        float x = (float)(i - offset) / (N / 2);
-        steppers[oid].f[i] = 1.0f - amp/2 + amp * (-(x * x) + 1.0f);
+        float pos = (float)i/N;
+        steppers[oid].f[i] = 1.0f + amp * sinf(2.0f * 3.141592 * rotations * pos + offset);
         fprintf(file, "f[%i]: %f\n", i, steppers[oid].f[i]);
     }
 
