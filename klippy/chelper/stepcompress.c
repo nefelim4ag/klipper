@@ -89,7 +89,7 @@ minmax_point(struct stepcompress *sc, uint32_t *pos)
 {
     uint32_t lsc = sc->last_step_clock, point = *pos - lsc;
     uint32_t prevpoint = pos > sc->queue_pos ? *(pos-1) - lsc : 0;
-    uint32_t max_error = (point - prevpoint) / 2;
+    uint32_t max_error = (point - prevpoint) / 16;
     if (max_error > sc->max_error)
         max_error = sc->max_error;
     return (struct points){ point - max_error, point };
