@@ -12,7 +12,7 @@ class StepperShaper:
         self.period = config.getint('period', 0, minval=0, maxval=1024)
         self.offset = config.getint('offset', 0,
                                     minval=0, maxval=self.period)
-        self.rotations = config.getint('rotations', 0, minval=0, maxval=4)
+        self.rotations = config.getfloat('rotations', 0, minval=0, maxval=20)
         self.amplitude = config.getint('amplitude', 10)
         self.tmc = None
         self.microsteps = 0
@@ -88,9 +88,9 @@ class StepperShaper:
         self.offset = gcmd.get_int('OFFSET',
                                    period//2,
                                    minval=0, maxval=period)
-        self.rotations = gcmd.get_int('ROTS',
+        self.rotations = gcmd.get_float('ROTS',
                                    self.rotations,
-                                   minval=0, maxval=4)
+                                   minval=0, maxval=20)
         self.period = period
         self.stepper_set_shaper_params()
     cmd_GET_STEPPER_SHAPER_help = "Set stepper shaper params"
