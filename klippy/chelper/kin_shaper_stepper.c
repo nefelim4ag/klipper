@@ -28,7 +28,7 @@ struct tracker {
 static struct tracker steppers[64];
 
 int __visible
-stepper_set_shaper_params(uint32_t oid, int mscnt, int msteps, int period, int offset, int rotations, int amplitude)
+stepper_set_shaper_params(uint32_t oid, int mscnt, int msteps, int period, int offset, float rotations, int amplitude)
 {
     if (oid >= 64) {
         errorf("stepper shaper oid %d > MAX", oid);
