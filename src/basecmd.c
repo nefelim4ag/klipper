@@ -4,6 +4,7 @@
 //
 // This file may be distributed under the terms of the GNU GPLv3 license.
 
+#include "autoconf.h" // CONFIG_CLOCK_FREQ
 #include <string.h> // memset
 #include "basecmd.h" // oid_lookup
 #include "board/irq.h" // irq_save
@@ -321,8 +322,12 @@ stats_update(uint32_t start, uint32_t cur)
     if (nextsumsq < sumsq)
         nextsumsq = 0xffffffff;
     sumsq = nextsumsq;
-
-    if (timer_is_before(cur, stats_send_time + timer_from_us(5000000)))
+    uint32_t report_int_us = 5000000;
+    // Avoid int overflow
+    if (timer_from_us(report_int_us) > 2000000000) {
+        report_int_us = (2000000000 / CONFIG_CLOCK_FREQ) * 1000000;
+    }
+    if (timer_is_before(cur, stats_send_time + timer_from_us(report_int_us)))
         return;
     sendf("stats count=%u sum=%u sumsq=%u", count, sum, sumsq);
     if (cur < stats_send_time)
