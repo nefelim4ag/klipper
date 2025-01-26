@@ -18,15 +18,18 @@
  #define HAVE_SINGLE_SCHEDULE 1
  #define HAVE_EDGE_OPTIMIZATION 1
  #define HAVE_AVR_OPTIMIZATION 0
+ #define HAVE_FULL_OPTIMIZATION 1
  DECL_CONSTANT("STEPPER_BOTH_EDGE", 1);
 #elif CONFIG_INLINE_STEPPER_HACK && CONFIG_MACH_AVR
  #define HAVE_SINGLE_SCHEDULE 1
  #define HAVE_EDGE_OPTIMIZATION 0
  #define HAVE_AVR_OPTIMIZATION 1
+ #define HAVE_FULL_OPTIMIZATION 0
 #else
  #define HAVE_SINGLE_SCHEDULE 0
  #define HAVE_EDGE_OPTIMIZATION 0
  #define HAVE_AVR_OPTIMIZATION 0
+ #define HAVE_FULL_OPTIMIZATION 0
 #endif
 
 #define HAVE_TOO_FAST_MCU (CONFIG_CLOCK_FREQ > 430000000)
@@ -62,6 +65,9 @@ enum {
     SF_SINGLE_SCHED=1<<4, SF_HAVE_ADD=1<<5
 };
 
+uint_fast8_t
+stepper_event_full_pstart(struct timer *t);
+
 // Setup a stepper for the next move in its queue
 static uint_fast8_t
 stepper_load_next(struct stepper *s)
@@ -90,6 +96,10 @@ stepper_load_next(struct stepper *s)
         s->next_step_time += m->interval;
         s->time.waketime = s->next_step_time;
         s->count = (uint32_t)m->count * 2;
+        if (HAVE_FULL_OPTIMIZATION) {
+            s->count = m->count;
+            s->time.func = stepper_event_full_pstart;
+        }
     }
     // Add all steps to s->position (stepper_get_position() can calc mid-move)
     if (m->flags & MF_DIR) {
@@ -186,6 +196,50 @@ reschedule_min:
     return SF_RESCHEDULE;
 }
 
+// Branchless "double scheduled" step function
+uint_fast8_t
+stepper_event_full_pend(struct timer *t);
+uint_fast8_t
+stepper_event_full_pstart(struct timer *t)
+{
+    struct stepper *s = container_of(t, struct stepper, time);
+    gpio_out_toggle_noirq(s->step_pin);
+    uint32_t curtime = timer_read_time();
+    uint32_t min_next_time = curtime + s->step_pulse_ticks;
+    s->time.func = stepper_event_full_pend;
+    s->time.waketime = min_next_time;
+    return SF_RESCHEDULE;
+}
+
+uint_fast8_t
+stepper_event_full_pend(struct timer *t)
+{
+    struct stepper *s = container_of(t, struct stepper, time);
+    gpio_out_toggle_noirq(s->step_pin);
+    uint32_t curtime = timer_read_time();
+    uint32_t min_next_time = curtime + s->step_pulse_ticks;
+    s->count--;
+    if (likely(s->count)) {
+        s->next_step_time += s->interval;
+        s->interval += s->add;
+        s->time.waketime = s->next_step_time;
+        s->time.func = stepper_event_full_pstart;
+        if (unlikely(timer_is_before(s->next_step_time, min_next_time)))
+            // The next step event is too close - push it back
+            s->time.waketime = min_next_time;
+        return SF_RESCHEDULE;
+    }
+    uint_fast8_t ret = stepper_load_next(s);
+    if (ret == SF_DONE || !timer_is_before(s->time.waketime, min_next_time))
+        return ret;
+    // Next step event is too close to the last unstep
+    int32_t diff = s->time.waketime - min_next_time;
+    if (diff < (int32_t)-timer_from_us(1000))
+        shutdown("Stepper too far in past");
+    s->time.waketime = min_next_time;
+    return SF_RESCHEDULE;
+}
+
 // Optimized entry point for step function (may be inlined into sched.c code)
 uint_fast8_t
 stepper_event(struct timer *t)
@@ -194,6 +248,8 @@ stepper_event(struct timer *t)
         return stepper_event_edge(t);
     if (HAVE_AVR_OPTIMIZATION)
         return stepper_event_avr(t);
+    if (HAVE_FULL_OPTIMIZATION)
+        return stepper_event_full_pstart(t);
     return stepper_event_full(t);
 }
 
@@ -211,6 +267,8 @@ command_config_stepper(uint32_t *args)
     if (HAVE_EDGE_OPTIMIZATION) {
         if (!s->step_pulse_ticks && invert_step < 0)
             s->flags |= SF_SINGLE_SCHED;
+        else if (HAVE_FULL_OPTIMIZATION)
+            s->time.func = stepper_event_full_pstart;
         else
             s->time.func = stepper_event_full;
     } else if (HAVE_AVR_OPTIMIZATION) {
