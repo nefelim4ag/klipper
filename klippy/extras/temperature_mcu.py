@@ -19,6 +19,7 @@ class PrinterTemperatureMCU:
         self.temp1 = self.adc1 = self.temp2 = self.adc2 = None
         self.min_temp = self.max_temp = 0.
         self.debug_read_cmd = None
+        self.temp_cbs = []
         # Read config
         mcu_name = config.get('sensor_mcu', 'mcu')
         self.temp1 = config.getfloat('sensor_temperature1', None)
@@ -41,8 +42,11 @@ class PrinterTemperatureMCU:
         self.printer.register_event_handler("klippy:mcu_identify",
                                             self.handle_mcu_identify)
     # Temperature interface
-    def setup_callback(self, temperature_callback):
-        self.temperature_callback = temperature_callback
+    def setup_callback(self, cb):
+        self.temp_cbs.append(cb)
+    def temperature_callback(self, read_time, temp):
+        for cb in self.temp_cbs:
+            cb(read_time, temp)
     def get_report_time_delta(self):
         return REPORT_TIME
     def setup_minmax(self, min_temp, max_temp):

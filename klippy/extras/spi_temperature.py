@@ -19,7 +19,6 @@ class SensorBase:
     def __init__(self, config, chip_type, config_cmd=None, spi_mode=1):
         self.printer = config.get_printer()
         self.chip_type = chip_type
-        self._callback = None
         self.min_sample_value = self.max_sample_value = 0
         self._report_clock = 0
         self.spi = bus.MCU_SPI_from_config(
@@ -32,12 +31,16 @@ class SensorBase:
         mcu.register_response(self._handle_spi_response,
                               "thermocouple_result", oid)
         mcu.register_config_callback(self._build_config)
+        self.temp_cbs = []
     def setup_minmax(self, min_temp, max_temp):
         adc_range = [self.calc_adc(min_temp), self.calc_adc(max_temp)]
         self.min_sample_value = min(adc_range)
         self.max_sample_value = max(adc_range)
     def setup_callback(self, cb):
-        self._callback = cb
+        self.temp_cbs.append(cb)
+    def _callback(self, read_time, temp):
+        for cb in self.temp_cbs:
+            cb(read_time, temp)
     def get_report_time_delta(self):
         return REPORT_TIME
     def _build_config(self):

@@ -13,6 +13,7 @@ class PrinterSensorCombined:
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
         self.name = config.get_name().split()[-1]
+        self.temp_cbs = []
         # get sensor names
         self.sensor_names = config.getlist('sensor_list')
         # get maximum_deviation parameter from config
@@ -69,8 +70,12 @@ class PrinterSensorCombined:
         self.min_temp = min_temp
         self.max_temp = max_temp
 
-    def setup_callback(self, temperature_callback):
-        self.temperature_callback = temperature_callback
+    def setup_callback(self, cb):
+        self.temp_cbs.append(cb)
+
+    def temperature_callback(self, read_time, temp):
+        for cb in self.temp_cbs:
+            cb(read_time, temp)
 
     def get_report_time_delta(self):
         return REPORT_TIME

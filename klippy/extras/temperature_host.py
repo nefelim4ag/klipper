@@ -15,6 +15,7 @@ class Temperature_HOST:
         self.reactor = self.printer.get_reactor()
         self.name = config.get_name().split()[-1]
         self.path = config.get("sensor_path", RPI_PROC_TEMP_FILE)
+        self.temp_cbs = []
 
         self.temp = self.min_temp = self.max_temp = 0.0
 
@@ -40,7 +41,11 @@ class Temperature_HOST:
         self.max_temp = max_temp
 
     def setup_callback(self, cb):
-        self._callback = cb
+        self.temp_cbs.append(cb)
+
+    def _callback(self, read_time, temp):
+        for cb in self.temp_cbs:
+            cb(read_time, temp)
 
     def get_report_time_delta(self):
         return HOST_REPORT_TIME

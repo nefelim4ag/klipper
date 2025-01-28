@@ -25,8 +25,12 @@ class PrinterADCtoTemperature:
         self.mcu_adc.setup_adc_callback(self.report_time, self.adc_callback)
         self.diag_helper = HelperTemperatureDiagnostics(
             config, self.mcu_adc, adc_convert.calc_temp)
-    def setup_callback(self, temperature_callback):
-        self.temperature_callback = temperature_callback
+        self.temp_cbs = []
+    def setup_callback(self, cb):
+        self.temp_cbs.append(cb)
+    def temperature_callback(self, read_time, temp):
+        for cb in self.temp_cbs:
+            cb(read_time, temp)
     def get_report_time_delta(self):
         return self.report_time
     def adc_callback(self, read_time, read_value):

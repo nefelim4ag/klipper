@@ -36,7 +36,7 @@ class LM75:
         self.printer.add_object("lm75 " + self.name, self)
         self.printer.register_event_handler("klippy:connect",
                                             self.handle_connect)
-
+        self.temp_cbs = []
     def handle_connect(self):
         self._init_lm75()
         self.reactor.update_timer(self.sample_timer, self.reactor.NOW)
@@ -46,7 +46,11 @@ class LM75:
         self.max_temp = max_temp
 
     def setup_callback(self, cb):
-        self._callback = cb
+        self.temp_cbs.append(cb)
+
+    def _callback(self, read_time, temp):
+        for cb in self.temp_cbs:
+            cb(read_time, temp)
 
     def get_report_time_delta(self):
         return self.report_time

@@ -158,6 +158,7 @@ class BME280:
         self.printer.register_event_handler("klippy:connect",
                                             self.handle_connect)
         self.last_gas_time = 0
+        self.temp_cbs = []
 
     def handle_connect(self):
         self._init_bmxx80()
@@ -168,7 +169,11 @@ class BME280:
         self.max_temp = max_temp
 
     def setup_callback(self, cb):
-        self._callback = cb
+        self.temp_cbs.append(cb)
+
+    def _callback(self, read_time, temp):
+        for cb in self.temp_cbs:
+            cb(read_time, temp)
 
     def get_report_time_delta(self):
         return REPORT_TIME
