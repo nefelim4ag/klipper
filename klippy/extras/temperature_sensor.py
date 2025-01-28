@@ -22,8 +22,15 @@ class PrinterSensorGeneric:
         self.last_temp = 0.
         self.measured_min = 99999999.
         self.measured_max = 0.
+        self.temp_cbs = []
+    def setup_callback(self, cb):
+        self.temp_cbs.append(cb)
+    def _callback(self, read_time, temp):
+        for cb in self.temp_cbs:
+            cb(read_time, temp)
     def temperature_callback(self, read_time, temp):
         self.last_temp = temp
+        self._callback(read_time, temp)
         if temp:
             self.measured_min = min(self.measured_min, temp)
             self.measured_max = max(self.measured_max, temp)
