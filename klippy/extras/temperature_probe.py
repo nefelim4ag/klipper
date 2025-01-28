@@ -160,7 +160,12 @@ class TemperatureProbe:
                 "%s: No probe named %s configured, thermal drift compensation "
                 "disabled." % (self.name, pname)
             )
-
+        self.temp_cbs = []
+    def setup_callback(self, cb):
+        self.temp_cbs.append(cb)
+    def _callback(self, read_time, temp):
+        for cb in self.temp_cbs:
+            cb(read_time, temp)
     def _temp_callback(self, read_time, temp):
         smoothed_temp, measured_min, measured_max = self.last_measurement
         time_diff = read_time - self.last_temp_read_time
@@ -175,6 +180,7 @@ class TemperatureProbe:
             self.printer.get_reactor().register_async_callback(
                 self._check_kick_next
             )
+        self._callback(read_time, smoothed_temp)
 
     def _check_kick_next(self, eventtime):
         smoothed_temp = self.last_measurement[0]
