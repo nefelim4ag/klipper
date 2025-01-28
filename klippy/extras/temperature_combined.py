@@ -5,6 +5,8 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
+import threading
+
 REPORT_TIME = 0.300
 
 
@@ -20,8 +22,9 @@ class PrinterSensorCombined:
         self.max_deviation = config.getfloat('maximum_deviation', above=0.)
         # ensure compatibility with itself
         self.sensor = self
-        # get empty list for sensors, could be any sensor class or a heater
-        self.sensors = []
+        # get empty dict for sensors, could be any sensor class or a heater
+        self.sensors = {}
+        self.state_lock = threading.Lock()
         # get combination method to handle the different sensor values with
         algos = {'min': min, 'max': max, 'mean': mean}
         self.apply_mode = config.getchoice('combination_method', algos)
@@ -46,6 +49,10 @@ class PrinterSensorCombined:
                 raise self.printer.config_error(
                         "'%s' does not have a status."
                         % (sensor_name,))
+            if not hasattr(sensor, 'setup_callback'):
+                raise self.printer.config_error(
+                        "'%s' does not have a setup_callback."
+                        % (sensor_name,))
             status = sensor.get_status(self.reactor.monotonic())
             if 'temperature' not in status:
                 raise self.printer.config_error(
@@ -56,8 +63,11 @@ class PrinterSensorCombined:
                 raise self.printer.config_error(
                         "Temperature monitor '%s' is not supported"
                         % (sensor_name,))
-
-            self.sensors.append(sensor)
+            def cb(read_time, temp, sensor_name=sensor_name):
+                with self.state_lock:
+                    self.sensors[sensor] = temp
+                    self._update_temp()
+            sensor.setup_callback(cb)
 
     def _handle_ready(self):
         # Start temperature update timer
@@ -78,12 +88,12 @@ class PrinterSensorCombined:
     def get_report_time_delta(self):
         return REPORT_TIME
 
-    def update_temp(self, eventtime):
+    # Call under local state lock
+    def _update_temp(self):
         values = []
-        for sensor in self.sensors:
-            sensor_status = sensor.get_status(eventtime)
-            sensor_temperature = sensor_status['temperature']
-            values.append(sensor_temperature)
+        # This is expected that upon initialization there can be not enough values
+        for sname in self.sensors:
+            values.append(self.sensors[sname])
 
         # check if values are out of max_deviation range
         if (max(values) - min(values)) > self.max_deviation:
@@ -97,37 +107,37 @@ class PrinterSensorCombined:
             self.last_temp = temp
 
     def get_temp(self, eventtime):
-        return self.last_temp, 0.
+        with self.state_lock:
+            return self.last_temp, 0.
 
     def get_status(self, eventtime):
-        return {'temperature': round(self.last_temp, 2),
-                }
-
+        with self.state_lock:
+            return {'temperature': round(self.last_temp, 2),
+                   }
+    # Decoupled from update to avoid recursive locking
     def _temperature_update_event(self, eventtime):
-        # update sensor value
-        self.update_temp(eventtime)
+        with self.state_lock:
+            # check min / max temp values
+            if self.last_temp < self.min_temp:
+                self.printer.invoke_shutdown(
+                    "COMBINED SENSOR temperature %0.1f "
+                    "below minimum temperature of %0.1f."
+                    % (self.last_temp, self.min_temp,))
+            if self.last_temp > self.max_temp:
+                self.printer.invoke_shutdown(
+                    "COMBINED SENSOR temperature %0.1f "
+                    "above maximum temperature of %0.1f."
+                    % (self.last_temp, self.max_temp,))
 
-        # check min / max temp values
-        if self.last_temp < self.min_temp:
-            self.printer.invoke_shutdown(
-                "COMBINED SENSOR temperature %0.1f "
-                "below minimum temperature of %0.1f."
-                % (self.last_temp, self.min_temp,))
-        if self.last_temp > self.max_temp:
-            self.printer.invoke_shutdown(
-                "COMBINED SENSOR temperature %0.1f "
-                "above maximum temperature of %0.1f."
-                % (self.last_temp, self.max_temp,))
-
-        # this is copied from temperature_host to enable time triggered updates
-        # get mcu and measured / current(?) time
-        mcu = self.printer.lookup_object('mcu')
-        measured_time = self.reactor.monotonic()
-        # convert to print time?! for the callback???
-        self.temperature_callback(mcu.estimated_print_time(measured_time),
-                                  self.last_temp)
-        # set next update time
-        return measured_time + REPORT_TIME
+            # this is copied from temperature_host to enable time triggered updates
+            # get mcu and measured / current(?) time
+            mcu = self.printer.lookup_object('mcu')
+            measured_time = self.reactor.monotonic()
+            # convert to print time?! for the callback???
+            self.temperature_callback(mcu.estimated_print_time(measured_time),
+                                    self.last_temp)
+            # set next update time
+            return measured_time + REPORT_TIME
 
 
 def mean(values):
