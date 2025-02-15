@@ -56,7 +56,7 @@ struct serialqueue {
     uint64_t send_seq, receive_seq;
     uint64_t ignore_nak_seq, last_ack_seq, retransmit_seq, rtt_sample_seq;
     struct list_head sent_queue;
-    double srtt, rttvar, rto;
+    double srtt, rttvar, rto, maxrtt;
     // Pending transmission message queues
     struct list_head pending_queues;
     int ready_bytes, upcoming_bytes, need_ack_bytes, last_ack_bytes;
@@ -204,6 +204,11 @@ update_receive_seq(struct serialqueue *sq, double eventtime, uint64_t rseq)
         else if (sq->rto > MAX_RTO)
             sq->rto = MAX_RTO;
         sq->rtt_sample_seq = 0;
+        // Track spikes
+        double half_rtt = delta / 2.0;
+        sq->maxrtt *= exp(-0.1 * half_rtt);
+        if (half_rtt > sq->maxrtt)
+            sq->maxrtt = half_rtt;
     }
     if (list_empty(&sq->sent_queue)) {
         pollreactor_update_timer(sq->pr, SQPT_RETRANSMIT, PR_NEVER);
@@ -932,13 +937,13 @@ serialqueue_get_stats(struct serialqueue *sq, char *buf, int len)
     snprintf(buf, len, "bytes_write=%u bytes_read=%u"
              " bytes_retransmit=%u bytes_invalid=%u"
              " send_seq=%u receive_seq=%u retransmit_seq=%u"
-             " srtt=%.3f rttvar=%.3f rto=%.3f"
+             " srtt=%.3f rttvar=%.3f rto=%.3f maxrtt=%.3f"
              " ready_bytes=%u upcoming_bytes=%u"
              , stats.bytes_write, stats.bytes_read
              , stats.bytes_retransmit, stats.bytes_invalid
              , (int)stats.send_seq, (int)stats.receive_seq
              , (int)stats.retransmit_seq
-             , stats.srtt, stats.rttvar, stats.rto
+             , stats.srtt, stats.rttvar, stats.rto, stats.maxrtt
              , stats.ready_bytes, stats.upcoming_bytes);
 }
 
