@@ -28,6 +28,7 @@
 #include "pollreactor.h" // pollreactor_alloc
 #include "pyhelper.h" // get_monotonic
 #include "serialqueue.h" // struct queue_message
+#include "stdio.h"
 
 struct command_queue {
     struct list_head upcoming_queue, ready_queue;
@@ -72,6 +73,8 @@ struct serialqueue {
     struct list_head old_sent, old_receive;
     // Stats
     uint32_t bytes_write, bytes_read, bytes_retransmit, bytes_invalid;
+    // Histogram 1us precision
+    uint32_t historgram[50000];
 };
 
 #define SQPF_SERIAL 0
@@ -206,6 +209,11 @@ update_receive_seq(struct serialqueue *sq, double eventtime, uint64_t rseq)
         sq->rtt_sample_seq = 0;
         // Track spikes
         double half_rtt = delta / 2.0;
+        uint32_t usec = (int)(half_rtt * 1000000);
+        if (usec < sizeof(sq->historgram)/4)
+            sq->historgram[usec] += 1;
+        else
+            sq->historgram[50000-1] += 1;
         sq->maxrtt *= exp(-0.1 * half_rtt);
         if (half_rtt > sq->maxrtt)
             sq->maxrtt = half_rtt;
@@ -930,9 +938,20 @@ void __visible
 serialqueue_get_stats(struct serialqueue *sq, char *buf, int len)
 {
     struct serialqueue stats;
+    char path[128];
+    sprintf(path, "/tmp/rtt_%i.stats", sq->serial_fd);
+    FILE *fd = fopen(path, "w");
     pthread_mutex_lock(&sq->lock);
     memcpy(&stats, sq, sizeof(stats));
     pthread_mutex_unlock(&sq->lock);
+    for (uint32_t i = 0; i < sizeof(sq->historgram)/4; i++) {
+        if (stats.historgram[i] == 0)
+            continue;
+        uint32_t count = stats.historgram[i];
+        uint32_t usec = i;
+        fprintf(fd, "%u %u\n", usec, count);
+    }
+    fclose(fd);
 
     snprintf(buf, len, "bytes_write=%u bytes_read=%u"
              " bytes_retransmit=%u bytes_invalid=%u"
