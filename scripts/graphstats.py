@@ -95,6 +95,7 @@ def plot_mcu(data, maxbw):
     loads = []
     awake = []
     hostbuffers = []
+    maxrtt = []
     for d in data:
         st = d['#sampletime']
         timedelta = st - lasttime
@@ -113,6 +114,7 @@ def plot_mcu(data, maxbw):
             hb = 0.
         else:
             hb = 100. * (MAXBUFFER - hb) / MAXBUFFER
+        maxrtt.append(float(d.get("maxrtt", .0)))
         hostbuffers.append(hb)
         times.append(datetime.datetime.utcfromtimestamp(st))
         bwdeltas.append(100. * (bw - lastbw) / (maxbw * timedelta))
@@ -130,9 +132,16 @@ def plot_mcu(data, maxbw):
     ax1.plot_date(times, loads, 'r', label='MCU load', alpha=0.8)
     ax1.plot_date(times, hostbuffers, 'c', label='Host buffer', alpha=0.8)
     ax1.plot_date(times, awake, 'y', label='Awake time', alpha=0.6)
+
+    ax2 = ax1.twinx()
+    ax2.set_ylabel('Latency (s)')
+    ax2.plot_date(times, maxrtt, 'b--', label='Latency', alpha=0.8)
+
     fontP = matplotlib.font_manager.FontProperties()
     fontP.set_size('x-small')
-    ax1.legend(loc='best', prop=fontP)
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    fig.legend(lines1 + lines2, labels1 + labels2, loc='upper right', prop=fontP)
     ax1.xaxis.set_major_formatter(matplotlib.dates.DateFormatter('%H:%M'))
     ax1.grid(True)
     return fig
