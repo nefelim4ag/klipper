@@ -5129,6 +5129,20 @@ cs_pin:
 #   above parameters.
 ```
 
+### [heater_pc]
+
+Heater prediction power correction.
+
+```
+[heater_pc extruder]
+#func:
+#  {% set pwr_adj = printer.fan.speed * 0.10 %}
+#  { pwr_adj }
+#   Because of PID reactivity, the cooling fan can cool hotend too much.
+#   This a place for template, which should return float
+#   -1. < 0 < 1. which later will adj pid values
+```
+
 ## Common bus parameters
 
 ### Common SPI settings
