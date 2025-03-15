@@ -15,7 +15,7 @@
 struct spi_software {
     struct gpio_in miso;
     struct gpio_out mosi, sclk;
-    uint32_t sck_ticks;
+    uint16_t sck_ticks;
     uint8_t mode;
 };
 
@@ -23,6 +23,7 @@ void
 command_spi_set_software_bus(uint32_t *args)
 {
     uint8_t mode = args[4];
+    // 550Mhz/100Khz = 5500 ticks
     uint32_t pulse_ticks = args[5];
     if (mode > 3)
         shutdown("Invalid spi config");
@@ -33,7 +34,7 @@ command_spi_set_software_bus(uint32_t *args)
     ss->mosi = gpio_out_setup(args[2], 0);
     ss->sclk = gpio_out_setup(args[3], 0);
     ss->mode = mode;
-    ss->sck_ticks = pulse_ticks >> 1;
+    ss->sck_ticks = pulse_ticks;
     spidev_set_software_bus(spi, ss);
 }
 DECL_COMMAND(command_spi_set_software_bus,
@@ -47,42 +48,50 @@ spi_software_prepare(struct spi_software *ss)
 }
 
 static void
-spi_delay(uint32_t *start, uint32_t ticks)
+spi_delay(uint32_t *time, uint32_t ticks)
 {
-    uint32_t end = *start + ticks;
-    while(unlikely(timer_is_before(timer_read_time(), end)));
-    *start = end;
+    uint32_t cur = timer_read_time();
+    *time += ticks;
+    // Handle interrupts
+    if (timer_is_before(*time, cur)) {
+        *time = cur;
+        return;
+    }
+    while (timer_is_before(cur, *time))
+        cur = timer_read_time();
+    *time = cur;
 }
 
 void
 spi_software_transfer(struct spi_software *ss, uint8_t receive_data
                       , uint8_t len, uint8_t *data)
 {
-    uint32_t start = timer_read_time();
+    uint32_t t1 = ss->sck_ticks >> 1;
+    uint32_t t2 = t1 + (ss->sck_ticks & 1);
+    uint32_t time = timer_read_time() - t1;
     while (len--) {
         uint8_t outbuf = *data;
         uint8_t inbuf = 0;
         for (uint_fast8_t i = 0; i < 8; i++) {
+            spi_delay(&time, t1);
             if (ss->mode & 0x01) {
                 // MODE 1 & 3
                 gpio_out_toggle(ss->sclk);
                 gpio_out_write(ss->mosi, outbuf & 0x80);
                 outbuf <<= 1;
-                spi_delay(&start, ss->sck_ticks);
+                spi_delay(&time, t2);
                 gpio_out_toggle(ss->sclk);
                 inbuf <<= 1;
                 inbuf |= gpio_in_read(ss->miso);
-                spi_delay(&start, ss->sck_ticks);
             } else {
                 // MODE 0 & 2
                 gpio_out_write(ss->mosi, outbuf & 0x80);
                 outbuf <<= 1;
                 gpio_out_toggle(ss->sclk);
-                spi_delay(&start, ss->sck_ticks);
+                spi_delay(&time, t2);
                 inbuf <<= 1;
                 inbuf |= gpio_in_read(ss->miso);
                 gpio_out_toggle(ss->sclk);
-                spi_delay(&start, ss->sck_ticks);
             }
         }
 
