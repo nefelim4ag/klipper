@@ -135,22 +135,18 @@ gpio_out_toggle_noirq(struct gpio_out g)
 void
 gpio_out_toggle(struct gpio_out g)
 {
-    irqstatus_t flag = irq_save();
     gpio_out_toggle_noirq(g);
-    irq_restore(flag);
 }
 
 void
 gpio_out_write(struct gpio_out g, uint32_t val)
 {
-    irqstatus_t flag = irq_save();
     GPIO_TypeDef *regs = g.regs;
     if (val)
         g.oc->c_bsrr = g.bit;
     else
         g.oc->c_bsrr = g.bit << 16;
     regs->BSRR = g.oc->c_bsrr;
-    irq_restore(flag);
 }
 
 
