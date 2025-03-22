@@ -11,24 +11,20 @@
 #include "hardware/structs/spi.h" // spi_hw_t
 #include "hardware/regs/resets.h" // RESETS_RESET_SPI*_BITS
 
+#define DECL_SPI_BUS(bus, miso, mosi, sck, order)                          \
+    DECL_ENUMERATION("spi_bus", #bus "_" #miso "_" #mosi "_" #sck, order); \
+    DECL_CONSTANT_STR("BUS_PINS_" #bus "_" #miso "_" #mosi "_" #sck,       \
+                      #miso "," #mosi "," #sck);
 
-DECL_ENUMERATION("spi_bus", "spi0_gpio0_gpio3_gpio2", 0);
-DECL_CONSTANT_STR("BUS_PINS_spi0_gpio0_gpio3_gpio2", "gpio0,gpio3,gpio2");
-DECL_ENUMERATION("spi_bus", "spi0_gpio4_gpio7_gpio6", 1);
-DECL_CONSTANT_STR("BUS_PINS_spi0_gpio4_gpio7_gpio6", "gpio4,gpio7,gpio6");
-DECL_ENUMERATION("spi_bus", "spi0_gpio16_gpio19_gpio18", 2);
-DECL_CONSTANT_STR("BUS_PINS_spi0_gpio16_gpio19_gpio18", "gpio16,gpio19,gpio18");
-DECL_ENUMERATION("spi_bus", "spi0_gpio20_gpio23_gpio22", 3);
-DECL_CONSTANT_STR("BUS_PINS_spi0_gpio20_gpio23_gpio22", "gpio20,gpio23,gpio22");
-DECL_ENUMERATION("spi_bus", "spi0_gpio4_gpio3_gpio2", 4);
-DECL_CONSTANT_STR("BUS_PINS_spi0_gpio4_gpio3_gpio2", "gpio4,gpio3,gpio2");
+DECL_SPI_BUS(spi0, gpio0,  gpio3,  gpio2,  0);
+DECL_SPI_BUS(spi0, gpio4,  gpio7,  gpio6,  1);
+DECL_SPI_BUS(spi0, gpio16, gpio19, gpio18, 2);
+DECL_SPI_BUS(spi0, gpio20, gpio23, gpio22, 3);
+DECL_SPI_BUS(spi0, gpio4,  gpio3,  gpio2,  4);
 
-DECL_ENUMERATION("spi_bus", "spi1_gpio8_gpio11_gpio10", 5);
-DECL_CONSTANT_STR("BUS_PINS_spi1_gpio8_gpio11_gpio10", "gpio8,gpio11,gpio10");
-DECL_ENUMERATION("spi_bus", "spi1_gpio12_gpio15_gpio14", 6);
-DECL_CONSTANT_STR("BUS_PINS_spi1_gpio12_gpio15_gpio14", "gpio12,gpio15,gpio14");
-DECL_ENUMERATION("spi_bus", "spi1_gpio24_gpio27_gpio26", 7);
-DECL_CONSTANT_STR("BUS_PINS_spi1_gpio24_gpio27_gpio26", "gpio24,gpio27,gpio26");
+DECL_SPI_BUS(spi1, gpio8,  gpio11, gpio10, 5);
+DECL_SPI_BUS(spi1, gpio12, gpio15, gpio14, 6);
+DECL_SPI_BUS(spi1, gpio24, gpio27, gpio26, 7);
 
 //Deprecated "spi0a" style mappings
 DECL_ENUMERATION("spi_bus", "spi0a", 0);
