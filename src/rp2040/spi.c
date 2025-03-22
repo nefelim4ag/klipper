@@ -25,6 +25,7 @@ DECL_SPI_BUS(spi0, gpio4,  gpio3,  gpio2,  4);
 DECL_SPI_BUS(spi1, gpio8,  gpio11, gpio10, 5);
 DECL_SPI_BUS(spi1, gpio12, gpio15, gpio14, 6);
 DECL_SPI_BUS(spi1, gpio24, gpio27, gpio26, 7);
+DECL_SPI_BUS(spi1, gpio12, gpio11, gpio10, 8);
 
 //Deprecated "spi0a" style mappings
 DECL_ENUMERATION("spi_bus", "spi0a", 0);
@@ -59,6 +60,7 @@ static const struct spi_info spi_bus[] = {
     {spi1_hw, 8,  11, 10, RESETS_RESET_SPI1_BITS},
     {spi1_hw, 12, 15, 14, RESETS_RESET_SPI1_BITS},
     {spi1_hw, 24, 27, 26, RESETS_RESET_SPI1_BITS},
+    {spi1_hw, 12, 11, 10, RESETS_RESET_SPI1_BITS},
 };
 
 struct spi_config
