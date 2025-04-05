@@ -271,7 +271,7 @@ class TMC5160CurrentHelper:
         run_current = config.getfloat('run_current',
                                       above=0., maxval=MAX_CURRENT)
         hold_current = config.getfloat('hold_current', MAX_CURRENT,
-                                       above=0., maxval=MAX_CURRENT)
+                                       minval=0., maxval=MAX_CURRENT)
         self.req_hold_current = hold_current
         self.sense_resistor = config.getfloat('sense_resistor', 0.075, above=0.)
         gscaler, irun, ihold = self._calc_current(run_current, hold_current)

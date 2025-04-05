@@ -127,7 +127,7 @@ class TMCCurrentHelper:
         run_current = config.getfloat('run_current',
                                       above=0., maxval=MAX_CURRENT)
         hold_current = config.getfloat('hold_current', MAX_CURRENT,
-                                       above=0., maxval=MAX_CURRENT)
+                                       minval=0., maxval=MAX_CURRENT)
         self.req_hold_current = hold_current
         self.sense_resistor = config.getfloat('sense_resistor', 0.110, above=0.)
         vsense, irun, ihold = self._calc_current(run_current, hold_current)
@@ -323,6 +323,7 @@ class TMC2130:
         set_config_field(config, "pwm_grad", 4)
         set_config_field(config, "pwm_freq", 1)
         set_config_field(config, "pwm_autoscale", True)
+        set_config_field(config, "freewheel", 0)
         # TPOWERDOWN
         set_config_field(config, "tpowerdown", 0)
 

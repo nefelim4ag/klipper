@@ -279,7 +279,7 @@ class TMC2240CurrentHelper:
         max_cur = self._get_ifs_rms(3)
         run_current = config.getfloat('run_current', above=0., maxval=max_cur)
         hold_current = config.getfloat('hold_current', max_cur,
-                                       above=0., maxval=max_cur)
+                                       minval=0., maxval=max_cur)
         self.req_hold_current = hold_current
         current_range = self._calc_current_range(run_current)
         self.fields.set_field("current_range", current_range)
@@ -308,6 +308,8 @@ class TMC2240CurrentHelper:
         ifs_rms = self._get_ifs_rms()
         if not globalscaler:
             globalscaler = 256
+        if current == .0:
+            return 0
         cs = int((current * 256. * 32.) / (globalscaler * ifs_rms) - 1. + .5)
         return max(0, min(31, cs))
     def _calc_current(self, run_current, hold_current):
