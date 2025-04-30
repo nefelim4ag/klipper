@@ -13,6 +13,7 @@
 #include "sched.h" // struct timer
 #include "stepper.h" // stepper_event
 #include "trsync.h" // trsync_add_signal
+#include "math.h" // M_PI
 
 DECL_CONSTANT("STEPPER_STEP_BOTH_EDGE", 1);
 
@@ -52,6 +53,10 @@ struct stepper {
     struct trsync_signal stop_signal;
     // gcc (pre v6) does better optimization when uint8_t are bitfields
     uint8_t flags : 8;
+    // Stealth current lag compensation
+    float motor_constant;
+    uint32_t msteps;
+    int32_t ctlag;
 };
 
 enum { POSITION_BIAS=0x40000000 };
@@ -147,6 +152,35 @@ stepper_event_avr(struct timer *t)
     return ret;
 }
 
+// Fast arctangent approximation optimized for MCU
+// Input range: [0, +inf)
+// Max error: ~0.01 radians (< 0.6 degrees)
+float fast_atan(float x) {
+    // Constants for the approximation
+    const float a1 = 0.9998f;
+    const float a2 = -0.3302f;
+    const float a3 = 0.1793f;
+    const float a4 = -0.0609f;
+
+    // Special cases
+    if (x < 0.0001f) return 0.0f;  // Near zero
+    if (x > 10000.0f) return 1.5708f;  // Near infinity, return π/2
+
+    // For x >= 1, use atan(x) = π/2 - atan(1/x)
+    if (x >= 1.0f) {
+        float x_inv = 1.0f / x;
+        float x_inv_sq = x_inv * x_inv;
+        // Polynomial approximation for atan(x) where x is in [0,1]
+        float result = 1.5708f - x_inv * (a1 + x_inv_sq * (
+            a2 + x_inv_sq * (a3 + x_inv_sq * a4)));
+        return result;
+    } else {
+        // Direct approximation for small x
+        float x_sq = x * x;
+        return x * (a1 + x_sq * (a2 + x_sq * (a3 + x_sq * a4)));
+    }
+}
+
 // Regular "fully scheduled" step function
 static uint_fast8_t
 stepper_event_full(struct timer *t)
@@ -160,7 +194,45 @@ stepper_event_full(struct timer *t)
         // Schedule unstep event
         goto reschedule_min;
     if (likely(s->count)) {
+        uint32_t prev_step_time = s->next_step_time;
         s->next_step_time += s->interval;
+        if (s->msteps) {
+            uint32_t dtstep = s->next_step_time - prev_step_time;
+            // fsteps cancel each other
+            const uint32_t fsteps = 1;
+            uint32_t msteps_per_rev = fsteps * s->msteps;
+            const float clock_freq = CONFIG_CLOCK_FREQ * 1.0;
+            float msteps_per_sec = clock_freq / dtstep;
+            float fsteps_per_sec = msteps_per_sec / s->msteps;
+            float phase_freq = fsteps_per_sec / 4;
+            if (phase_freq > .01 && phase_freq < 10000.0) {
+                // Electrical angular frequency
+                // return precision back
+                float omega = 2 * M_PI * phase_freq * fsteps;
+                float rads = fast_atan(omega * s->motor_constant);
+                float timelag = rads / omega;
+                float ntlag_f = timelag * clock_freq;
+                int ntlag = ntlag_f;
+                int diff = s->ctlag - ntlag;
+                // clamp time difference
+                int min = -timer_from_us(20);
+                int max = timer_from_us(20);
+                if (diff < min) {
+                    s->next_step_time -= timer_from_us(20);
+                    s->ctlag += timer_from_us(20);
+                } else if (diff > max) {
+                    s->next_step_time += timer_from_us(20);
+                    s->ctlag -= timer_from_us(20);
+                } else {
+                    s->ctlag = ntlag;
+                    s->next_step_time += diff;
+                }
+            } else {
+                s->next_step_time += s->ctlag;
+                s->ctlag = 0;
+            }
+        }
+        // step interval
         s->interval += s->add;
         if (unlikely(timer_is_before(s->next_step_time, min_next_time)))
             // The next step event is too close - push it back
@@ -286,6 +358,7 @@ command_reset_step_clock(uint32_t *args)
     if (s->count)
         shutdown("Can't reset time when stepper active");
     s->next_step_time = s->time.waketime = waketime;
+    s->ctlag = 0;
     s->flags &= ~SF_NEED_RESET;
     irq_enable();
 }
@@ -320,6 +393,24 @@ command_stepper_get_position(uint32_t *args)
 }
 DECL_COMMAND(command_stepper_get_position, "stepper_get_position oid=%c");
 
+void
+command_stealth_compensation(uint32_t *args)
+{
+    uint8_t oid = args[0];
+    struct stepper *s = stepper_oid_lookup(oid);
+    uint32_t ul = args[1];
+    uint32_t mohm = args[2];
+    uint32_t msteps = args[3];
+    float motor_constant = (float) ul / (float) mohm;
+    motor_constant = motor_constant / 1000;
+    irq_disable();
+    s->motor_constant = motor_constant;
+    s->msteps = msteps;
+    irq_enable();
+}
+DECL_COMMAND(command_stealth_compensation,
+             "stealth_compensation oid=%c ul=%u mohm=%u msteps=%u");
+
 // Stop all moves for a given stepper (caller must disable IRQs)
 static void
 stepper_stop(struct trsync_signal *tss, uint8_t reason)
@@ -327,6 +418,7 @@ stepper_stop(struct trsync_signal *tss, uint8_t reason)
     struct stepper *s = container_of(tss, struct stepper, stop_signal);
     sched_del_timer(&s->time);
     s->next_step_time = s->time.waketime = 0;
+    s->ctlag = 0;
     s->position = -stepper_get_position(s);
     s->count = 0;
     s->flags = ((s->flags & (SF_INVERT_STEP|SF_SINGLE_SCHED|SF_OPTIMIZED_PATH))

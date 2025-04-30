@@ -47,6 +47,9 @@ class MCU_stepper:
                                       ffi_lib.stepcompress_free)
         ffi_lib.stepcompress_set_invert_sdir(self._stepqueue, self._invert_dir)
         self._mcu.register_stepqueue(self._stepqueue)
+        self.ul = 0
+        self.mohm = 0
+        self.microsteps = 0
         self._stepper_kinematics = None
         self._itersolve_generate_steps = ffi_lib.itersolve_generate_steps
         self._itersolve_check_active = ffi_lib.itersolve_check_active
@@ -119,6 +122,18 @@ class MCU_stepper:
         self._get_position_cmd = self._mcu.lookup_query_command(
             "stepper_get_position oid=%c",
             "stepper_position oid=%c pos=%i", oid=self._oid)
+        self.stealth_compensation_cmd = self._mcu.try_lookup_command(
+            "stealth_compensation oid=%c ul=%u mohm=%u msteps=%u"
+        )
+        if self.ul and self.mohm and self.stealth_compensation_cmd:
+            oid = self._oid
+            logging.info(
+                "stealth_compensation oid=%d ul=%d mohm=%d msteps=%d" %
+                 (oid, self.ul, self.mohm, self.microsteps))
+            self._mcu.add_config_cmd(
+                 "stealth_compensation oid=%d ul=%d mohm=%d msteps=%d" %
+                 (oid, self.ul, self.mohm, self.microsteps)
+            )
         max_error = self._mcu.get_max_stepper_error()
         max_error_ticks = self._mcu.seconds_to_clock(max_error)
         ffi_main, ffi_lib = chelper.get_ffi()
@@ -271,6 +286,9 @@ def PrinterStepper(config, units_in_radians=False):
     mcu_stepper = MCU_stepper(name, step_pin_params, dir_pin_params,
                               rotation_dist, steps_per_rotation,
                               step_pulse_duration, units_in_radians)
+    mcu_stepper.ul = config.getint('ul', default=0)
+    mcu_stepper.mohm = config.getint('mohm', default=0)
+    mcu_stepper.microsteps = config.getint('microsteps', minval=1)
     # Register with helper modules
     for mname in ['stepper_enable', 'force_move', 'motion_report']:
         m = printer.load_object(config, mname)
