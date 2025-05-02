@@ -217,6 +217,11 @@ stepper_event_full(struct timer *t)
                 // clamp time difference
                 int min = -timer_from_us(20);
                 int max = timer_from_us(20);
+                // Avoid stepper too far in the past
+                if (diff < 0 && s->ctlag > timer_from_us(800)) {
+                    diff = 0;
+                    ntlag = s->ctlag;
+                }
                 if (diff < min) {
                     s->next_step_time -= timer_from_us(20);
                     s->ctlag += timer_from_us(20);
