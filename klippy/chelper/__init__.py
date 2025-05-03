@@ -22,6 +22,7 @@ SOURCE_FILES = [
     'kin_cartesian.c', 'kin_corexy.c', 'kin_corexz.c', 'kin_delta.c',
     'kin_deltesian.c', 'kin_polar.c', 'kin_rotary_delta.c', 'kin_winch.c',
     'kin_extruder.c', 'kin_shaper.c', 'kin_idex.c',
+    'kin_stepper_shaper.c',
 ]
 DEST_LIB = "c_helper.so"
 OTHER_FILES = [
@@ -165,6 +166,14 @@ defs_kin_idex = """
     struct stepper_kinematics * dual_carriage_alloc(void);
 """
 
+defs_kin_stepper_shaper = """
+    double stepper_shaper_get_step_generation_window(
+        struct stepper_kinematics *sk);
+    int stepper_shaper_set_sk(struct stepper_kinematics *sk
+        , struct stepper_kinematics *orig_sk);
+    struct stepper_kinematics * stepper_shaper_alloc(void);
+"""
+
 defs_serialqueue = """
     #define MESSAGE_MAX 64
     struct pull_queue_message {
@@ -223,7 +232,7 @@ defs_all = [
     defs_itersolve, defs_trapq, defs_trdispatch,
     defs_kin_cartesian, defs_kin_corexy, defs_kin_corexz, defs_kin_delta,
     defs_kin_deltesian, defs_kin_polar, defs_kin_rotary_delta, defs_kin_winch,
-    defs_kin_extruder, defs_kin_shaper, defs_kin_idex,
+    defs_kin_extruder, defs_kin_shaper, defs_kin_idex, defs_kin_stepper_shaper,
 ]
 
 # Update filenames to an absolute path
