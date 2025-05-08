@@ -163,13 +163,13 @@ class InputShaper:
             is_sk = self._get_input_shaper_stepper_kinematics(s)
             if is_sk is None:
                 continue
-            old_delay = ffi_lib.input_shaper_get_step_generation_window(is_sk)
+            old_delay = ffi_lib.itersolve_get_step_generation_window(is_sk)
             for shaper in self.shapers:
                 if shaper in failed_shapers:
                     continue
                 if not shaper.set_shaper_kinematics(is_sk):
                     failed_shapers.append(shaper)
-            new_delay = ffi_lib.input_shaper_get_step_generation_window(is_sk)
+            new_delay = ffi_lib.itersolve_get_step_generation_window(is_sk)
             if old_delay != new_delay:
                 self.toolhead.note_step_generation_scan_time(new_delay,
                                                              old_delay)

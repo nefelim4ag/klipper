@@ -273,3 +273,10 @@ itersolve_get_commanded_pos(struct stepper_kinematics *sk)
 {
     return sk->commanded_pos;
 }
+
+double __visible
+itersolve_get_step_generation_window(struct stepper_kinematics *sk)
+{
+    return sk->gen_steps_pre_active > sk->gen_steps_post_active
+        ? sk->gen_steps_pre_active : sk->gen_steps_post_active;
+}
