@@ -11,6 +11,7 @@
 #include <string.h> // memset
 #include "compiler.h" // __visible
 #include "itersolve.h" // struct stepper_kinematics
+#include "stepcorr.h" // stepcorr_update_gen_steps_window
 #include "trapq.h" // struct move
 
 
@@ -310,6 +311,25 @@ input_shaper_set_sk(struct stepper_kinematics *sk
             return -1;
     }
     return 0;
+}
+
+static void
+shaper_note_generation_time(struct input_shaper *is)
+{
+    double pre_active = 0., post_active = 0.;
+    if ((is->sk.active_flags & AF_X) && is->sx.num_pulses) {
+        pre_active = is->sx.pulses[is->sx.num_pulses-1].t;
+        post_active = -is->sx.pulses[0].t;
+    }
+    if ((is->sk.active_flags & AF_Y) && is->sy.num_pulses) {
+        pre_active = is->sy.pulses[is->sy.num_pulses-1].t > pre_active
+            ? is->sy.pulses[is->sy.num_pulses-1].t : pre_active;
+        post_active = -is->sy.pulses[0].t > post_active
+            ? -is->sy.pulses[0].t : post_active;
+    }
+    is->sk.gen_steps_pre_active = pre_active;
+    is->sk.gen_steps_post_active = post_active;
+    stepcorr_update_gen_steps_window(&is->sk);
 }
 
 int __visible
