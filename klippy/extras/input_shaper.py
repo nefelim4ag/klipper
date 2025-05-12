@@ -90,7 +90,7 @@ class AxisInputShaper:
 class InputShaper:
     def __init__(self, config):
         self.printer = config.get_printer()
-        self.printer.register_event_handler("klippy:connect", self.connect)
+        self.printer.register_event_handler("klippy:connect", self.init)
         self.printer.register_event_handler("dual_carriage:update_kinematics",
                                             self._update_kinematics)
         self.toolhead = None
@@ -105,7 +105,7 @@ class InputShaper:
                                desc=self.cmd_SET_INPUT_SHAPER_help)
     def get_shapers(self):
         return self.shapers
-    def connect(self):
+    def init(self):
         self.toolhead = self.printer.lookup_object("toolhead")
         dual_carriage = self.printer.lookup_object('dual_carriage', None)
         if dual_carriage is not None:
