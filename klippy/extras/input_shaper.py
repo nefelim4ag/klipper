@@ -88,7 +88,7 @@ class AxisInputShaper:
 class InputShaper:
     def __init__(self, config):
         self.printer = config.get_printer()
-        self.printer.register_event_handler("klippy:connect", self.connect)
+        self.printer.register_event_handler("klippy:connect", self.init)
         self.toolhead = None
         self.shapers = [AxisInputShaper('x', config),
                         AxisInputShaper('y', config)]
@@ -101,7 +101,7 @@ class InputShaper:
                                desc=self.cmd_SET_INPUT_SHAPER_help)
     def get_shapers(self):
         return self.shapers
-    def connect(self):
+    def init(self):
         self.toolhead = self.printer.lookup_object("toolhead")
         # Configure initial values
         self._update_input_shaping(error=self.printer.config_error)
