@@ -2358,9 +2358,9 @@ object is available if any heater is defined):</p>
   "temperature_sensor electronics_temp"]</code>.</li>
 <li><code>available_monitors</code>: Returns a list of all currently available
   temperature monitors by their full config section names,
-  e.g. <code>["temperature_monitor stepper_x"]</code>.
-  While a temperature sensor is always available to read,
-  a temperature monitor may not be available and will return null in such case.</li>
+  e.g. <code>["tmc2240 stepper_x"]</code>.  While a temperature sensor is always
+  available to read, a temperature monitor may not be available and
+  will return null in such case.</li>
 </ul>
 <h2 id="idle_timeout">idle_timeout<a class="headerlink" href="#idle_timeout" title="Permanent link">&para;</a></h2>
 <p>The following information is available in the
