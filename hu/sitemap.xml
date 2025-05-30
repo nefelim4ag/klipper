@@ -1,283 +1,283 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/index.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/API_Server.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Axis_Twist_Compensation.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/BLTouch.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Beaglebone.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Bed_Level.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Bed_Mesh.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Benchmarks.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Bootloader_Entry.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Bootloaders.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/CANBUS.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/CANBUS_Troubleshooting.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/CANBUS_protocol.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/CONTRIBUTING.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Code_Overview.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Command_Templates.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Config_Changes.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Config_Reference.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Config_checks.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Contact.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Debugging.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Delta_Calibrate.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Eddy_Probe.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Endstop_Phase.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Example_Configs.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Exclude_Object.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/FAQ.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Features.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/G-Codes.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Hall_Filament_Width_Sensor.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Installation.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Kinematics.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Load_Cell.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/MCU_Commands.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Manual_Level.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Measuring_Resonances.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Multi_MCU_Homing.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Navigation.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/OctoPrint.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Overview.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Packaging.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Pressure_Advance.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Probe_Calibrate.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Protocol.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/RPi_microcontroller.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Releases.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Resonance_Compensation.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Rotation_Distance.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/SDCard_Updates.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Skew_Correction.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Slicers.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Sponsors.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Status_Reference.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/TMC_Drivers.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/TSL1401CL_Filament_Width_Sensor.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
     <url>
-         <loc>None</loc>
-         <lastmod>2025-05-30</lastmod>
+         <loc>https://www.klipper3d.org/Using_PWM_Tools.html</loc>
+         <lastmod>2025-05-31</lastmod>
          <changefreq>daily</changefreq>
     </url>
 </urlset>
