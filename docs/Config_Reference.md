@@ -711,6 +711,11 @@ anchor_y:
 anchor_z:
 #   The X, Y, and Z position of the cable winch in cartesian space.
 #   These parameters must be provided.
+#carriage_x: 0
+#carriage_y: 0
+#carriage_z: 0
+#   The X, Y, and Z positions of the cable mount point on the carriage.
+#   Simply mount point center offset.
 ```
 
 ### Generic Cartesian Kinematics
