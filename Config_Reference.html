@@ -7470,8 +7470,6 @@ section (for example, "[tmc2208 stepper_x]").</p>
 uart_pin:
 #   The pin connected to the TMC2208 PDN_UART line. This parameter
 #   must be provided.
-#uart_speed: 0
-#   The requested UART rate. The default is autopick.
 #tx_pin:
 #   If using separate receive and transmit lines to communicate with
 #   the driver then set uart_pin to the receive pin and tx_pin to the
@@ -7546,8 +7544,6 @@ run_current:
 #   - if coolstep_threshold is set and &quot;sensorless homing&quot; is used,
 #   then one must ensure that the homing speed is above the coolstep
 #   threshold! The default is to not enable the coolstep feature.
-#uart_speed: 0
-#   The requested UART rate. The default is autopick.
 #uart_address:
 #   The address of the TMC2209 chip for UART messages (an integer
 #   between 0 and 3). This is typically used when multiple TMC2209
@@ -7676,8 +7672,6 @@ cs_pin:
 #uart_pin:
 #   The pin connected to the TMC2240 DIAG1/SW line. If this parameter
 #   is provided UART communication is used rather then SPI.
-#uart_speed: 0
-#   The requested UART rate. The default is autopick.
 #chain_position:
 #chain_length:
 #   These parameters configure an SPI daisy chain. The two parameters
