@@ -105,7 +105,16 @@ class SHT3X:
     def _sample_sht3x(self, eventtime):
         try:
             # Read measurment
-            params = self.i2c.i2c_read(SHT3X_CMD['OTHER']['FETCH'], 6)
+            retries = 5
+            params = None
+            while retries > 0 and params is None:
+                params = self.i2c.i2c_read_oneshot(
+                    SHT3X_CMD['OTHER']['FETCH'], 6
+                )
+                self.reactor.pause(self.reactor.monotonic() + .5)
+                retries -= 1
+            if params is None:
+                raise Exception()
 
             response = bytearray(params['response'])
             rtemp  = response[0] << 8
