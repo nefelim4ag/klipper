@@ -51,7 +51,8 @@ class RetryAsyncCommand:
 # Wrapper around query commands
 class CommandQueryWrapper:
     def __init__(self, serial, msgformat, respformat, oid=None,
-                 cmd_queue=None, is_async=False, error=serialhdl.error):
+                 cmd_queue=None, is_async=False, is_oneshot=False,
+                 error=serialhdl.error):
         self._serial = serial
         self._cmd = serial.get_msgparser().lookup_command(msgformat)
         serial.get_msgparser().lookup_command(respformat)
@@ -59,6 +60,8 @@ class CommandQueryWrapper:
         self._oid = oid
         self._error = error
         self._xmit_helper = serialhdl.SerialRetryCommand
+        if is_oneshot:
+            self._xmit_helper = serialhdl.SerialOneshotCommand
         if is_async:
             self._xmit_helper = RetryAsyncCommand
         if cmd_queue is None:
@@ -899,9 +902,10 @@ class MCU:
     def lookup_command(self, msgformat, cq=None):
         return CommandWrapper(self._serial, msgformat, cq)
     def lookup_query_command(self, msgformat, respformat, oid=None,
-                             cq=None, is_async=False):
+                             cq=None, is_async=False, is_oneshot=False):
         return CommandQueryWrapper(self._serial, msgformat, respformat, oid,
-                                   cq, is_async, self._printer.command_error)
+                                   cq, is_async, is_oneshot,
+                                   self._printer.command_error)
     def try_lookup_command(self, msgformat):
         try:
             return self.lookup_command(msgformat)

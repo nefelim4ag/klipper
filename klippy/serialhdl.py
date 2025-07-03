@@ -330,6 +330,26 @@ class SerialRetryCommand:
             retries -= 1
             retry_delay *= 2.
 
+# Class to send a query that is non-retryable
+class SerialOneshotCommand:
+    def __init__(self, serial, name, oid=None):
+        self.serial = serial
+        self.name = name
+        self.oid = oid
+        self.last_params = None
+        self.serial.register_response(self.handle_callback, name, oid)
+    def handle_callback(self, params):
+        self.last_params = params
+    def get_response(self, cmds, cmd_queue, minclock=0, reqclock=0):
+        for cmd in cmds[:-1]:
+            self.serial.raw_send(cmd, minclock, reqclock, cmd_queue)
+        self.serial.raw_send_wait_ack(cmds[-1], minclock, reqclock,
+                                        cmd_queue)
+        params = self.last_params
+        self.serial.register_response(None, self.name, self.oid)
+        # Can return None
+        return params
+
 # Attempt to place an AVR stk500v2 style programmer into normal mode
 def stk500v2_leave(ser, reactor):
     logging.debug("Starting stk500v2 leave programmer sequence")
