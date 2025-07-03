@@ -205,6 +205,10 @@ class MCU_I2C:
             "i2c_read oid=%c reg=%*s read_len=%u",
             "i2c_read_response oid=%c response=%*s", oid=self.oid,
             cq=self.cmd_queue)
+        self.i2c_read_oneshot_cmd = self.mcu.lookup_query_command(
+            "i2c_read oid=%c reg=%*s read_len=%u",
+            "i2c_read_response oid=%c response=%*s", oid=self.oid,
+            cq=self.cmd_queue, is_oneshot=True)
     def i2c_write(self, data, minclock=0, reqclock=0):
         if self.i2c_write_cmd is None:
             # Send setup message via mcu initialization
@@ -219,6 +223,8 @@ class MCU_I2C:
                                 minclock=minclock, reqclock=reqclock)
     def i2c_read(self, write, read_len):
         return self.i2c_read_cmd.send([self.oid, write, read_len])
+    def i2c_read_oneshot(self, write, read_len):
+        return self.i2c_read_oneshot_cmd.send([self.oid, write, read_len])
 
 def MCU_I2C_from_config(config, default_addr=None, default_speed=100000):
     # Load bus parameters
