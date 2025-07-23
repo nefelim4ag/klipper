@@ -271,7 +271,8 @@ MAX_CURRENT = 10.000 # Maximum dependent on board, but 10 is safe sanity check
 class TMC5160CurrentHelper:
     def __init__(self, config, mcu_tmc):
         self.printer = config.get_printer()
-        self.name = config.get_name().split()[-1]
+        name_parts = config.get_name().split()
+        self.stepper_name = ' '.join(name_parts[1:])
         self.mcu_tmc = mcu_tmc
         self.fields = mcu_tmc.get_fields()
         run_current = config.getfloat('run_current',
@@ -282,8 +283,24 @@ class TMC5160CurrentHelper:
         self.sense_resistor = config.getfloat('sense_resistor', 0.075, above=0.)
         gscaler, irun, ihold = self._calc_current(run_current, hold_current)
         self.fields.set_field("globalscaler", gscaler)
-        self.fields.set_field("ihold", ihold)
+        self.fields.set_field("ihold", irun)
         self.fields.set_field("irun", irun)
+        self.ihold = ihold
+        if ihold != irun:
+            self.printer.register_event_handler("idle_timeout:ready",
+                                                self._handle_ready)
+    def _handle_ready(self, print_time):
+        val = self.fields.set_field("ihold", self.ihold)
+        self.mcu_tmc.set_register("IHOLD_IRUN", val, print_time)
+        force_move = self.printer.lookup_object("force_move")
+        stepper = force_move.lookup_stepper(self.stepper_name)
+        stepper.add_active_callback(self._restore)
+    def _restore(self, flush_time):
+        def callback(eventtime):
+            irun = self.fields.get_field("irun")
+            val = self.fields.set_field("ihold", irun)
+            self.mcu_tmc.set_register("IHOLD_IRUN", val, flush_time)
+        self.printer.get_reactor().register_callback(callback)
     def _calc_globalscaler(self, current):
         globalscaler = int((current * 256. * math.sqrt(2.)
                             * self.sense_resistor / VREF) + .5)
@@ -317,6 +334,7 @@ class TMC5160CurrentHelper:
     def set_current(self, run_current, hold_current, print_time):
         self.req_hold_current = hold_current
         gscaler, irun, ihold = self._calc_current(run_current, hold_current)
+        self.ihold = ihold
         val = self.fields.set_field("globalscaler", gscaler)
         self.mcu_tmc.set_register("GLOBALSCALER", val, print_time)
         self.fields.set_field("ihold", ihold)

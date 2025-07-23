@@ -115,7 +115,8 @@ MAX_CURRENT = 2.400
 class TMC2660CurrentHelper:
     def __init__(self, config, mcu_tmc):
         self.printer = config.get_printer()
-        self.name = config.get_name().split()[-1]
+        name_parts = config.get_name().split()
+        self.stepper_name = ' '.join(name_parts[1:])
         self.mcu_tmc = mcu_tmc
         self.fields = mcu_tmc.get_fields()
         self.current = config.getfloat('run_current', minval=0.1,
@@ -129,8 +130,6 @@ class TMC2660CurrentHelper:
         self.idle_current_percentage = config.getint(
             'idle_current_percent', default=100, minval=0, maxval=100)
         if self.idle_current_percentage < 100:
-            self.printer.register_event_handler("idle_timeout:printing",
-                                                self._handle_printing)
             self.printer.register_event_handler("idle_timeout:ready",
                                                 self._handle_ready)
 
@@ -157,15 +156,18 @@ class TMC2660CurrentHelper:
                     irun = irun2
         return vsense, irun
 
-    def _handle_printing(self, print_time):
-        print_time -= 0.100 # Schedule slightly before deadline
-        self.printer.get_reactor().register_callback(
-            (lambda ev: self._update_current(self.current, print_time)))
-
     def _handle_ready(self, print_time):
         current = self.current * float(self.idle_current_percentage) / 100.
         self.printer.get_reactor().register_callback(
             (lambda ev: self._update_current(current, print_time)))
+        force_move = self.printer.lookup_object("force_move")
+        stepper = force_move.lookup_stepper(self.stepper_name)
+        stepper.add_active_callback(self._restore)
+
+    def _restore(self, flush_time):
+        def callback(eventtime):
+            self._update_current(self.current, flush_time)
+        self.printer.get_reactor().register_callback(callback)
 
     def _update_current(self, current, print_time):
         vsense, cs = self._calc_current(current)
