@@ -254,8 +254,10 @@ class MCU_stepper:
         # Generate steps
         sk = self._stepper_kinematics
         ret = self._itersolve_generate_steps(sk, flush_time)
-        if ret:
-            raise error("Internal error in stepcompress")
+        def cb():
+            if ret:
+                raise error("Internal error in stepcompress")
+        return [cb]
     def is_active_axis(self, axis):
         ffi_main, ffi_lib = chelper.get_ffi()
         a = axis.encode()
@@ -449,8 +451,11 @@ class GenericPrinterRail:
         for stepper in self.steppers:
             stepper.setup_itersolve(alloc_func, *params)
     def generate_steps(self, flush_time):
+        cbs = []
         for stepper in self.steppers:
-            stepper.generate_steps(flush_time)
+            cb = stepper.generate_steps(flush_time)
+            cbs.extend(cb)
+        return cbs
     def set_trapq(self, trapq):
         for stepper in self.steppers:
             stepper.set_trapq(trapq)

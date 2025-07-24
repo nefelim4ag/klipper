@@ -85,7 +85,9 @@ class ForceMove:
         self.trapq_append(self.trapq, print_time, accel_t, cruise_t, accel_t,
                           0., 0., 0., axis_r, 0., 0., 0., cruise_v, accel)
         print_time = print_time + accel_t + cruise_t + accel_t
-        stepper.generate_steps(print_time)
+        cbs = stepper.generate_steps(print_time)
+        for cb in cbs:
+            cb()
         self.trapq_finalize_moves(self.trapq, print_time + 99999.9,
                                   print_time + 99999.9)
         stepper.set_trapq(prev_trapq)

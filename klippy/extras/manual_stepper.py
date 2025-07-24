@@ -76,7 +76,9 @@ class ManualStepper:
         self.sync_print_time()
         self.next_cmd_time = self._submit_move(self.next_cmd_time, movepos,
                                                speed, accel)
-        self.rail.generate_steps(self.next_cmd_time)
+        cbs = self.rail.generate_steps(self.next_cmd_time)
+        for cb in cbs:
+            cb()
         self.trapq_finalize_moves(self.trapq, self.next_cmd_time + 99999.9,
                                   self.next_cmd_time + 99999.9)
         toolhead = self.printer.lookup_object('toolhead')

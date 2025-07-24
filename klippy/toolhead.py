@@ -300,8 +300,12 @@ class ToolHead:
         sg_flush_want = min(flush_time + STEPCOMPRESS_FLUSH_TIME,
                             self.print_time - self.kin_flush_delay)
         sg_flush_time = max(sg_flush_want, flush_time)
+        cbs = []
         for sg in self.step_generators:
-            sg(sg_flush_time)
+            res = sg(sg_flush_time)
+            cbs.extend(res)
+        for cb in cbs:
+            cb()
         self.min_restart_time = max(self.min_restart_time, sg_flush_time)
         # Free trapq entries that are no longer needed
         clear_history_time = self.clear_history_time
