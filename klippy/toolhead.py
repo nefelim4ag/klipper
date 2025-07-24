@@ -293,6 +293,15 @@ class ToolHead:
                    "manual_probe", "tuning_tower", "garbage_collection"]
         for module_name in modules:
             self.printer.load_object(config, module_name)
+    def _generate_steps(self, generators, flush_time):
+        for sg in generators:
+            sg(flush_time, pre_async_run_cbs=True)
+        cbs = []
+        for sg in generators:
+            res = sg(flush_time, async_run=True)
+            cbs.extend(res)
+        for cb in cbs:
+            cb()
     # Print time and flush tracking
     def _advance_flush_time(self, flush_time):
         flush_time = max(flush_time, self.last_flush_time)
@@ -300,8 +309,7 @@ class ToolHead:
         sg_flush_want = min(flush_time + STEPCOMPRESS_FLUSH_TIME,
                             self.print_time - self.kin_flush_delay)
         sg_flush_time = max(sg_flush_want, flush_time)
-        for sg in self.step_generators:
-            sg(sg_flush_time)
+        self._generate_steps(self.step_generators, sg_flush_time)
         self.min_restart_time = max(self.min_restart_time, sg_flush_time)
         # Free trapq entries that are no longer needed
         clear_history_time = self.clear_history_time
@@ -561,8 +569,8 @@ class ToolHead:
             npt = min(self.print_time + DRIP_SEGMENT_TIME, next_print_time)
             self.note_mcu_movequeue_activity(npt + self.kin_flush_delay,
                                              set_step_gen_time=True)
-            for stepper in addstepper:
-                stepper.generate_steps(npt)
+            generators = [s.generate_steps for s in addstepper]
+            self._generate_steps(generators, npt)
             self._advance_move_time(npt)
         # Exit "Drip" state
         self.reactor.update_timer(self.flush_timer, self.reactor.NOW)
