@@ -34,6 +34,12 @@ class SerialReader:
         self.last_notify_id = 0
         self.pending_notifications = {}
     def _bg_thread(self):
+        try:
+            wp = self.warn_prefix.replace("'",'').replace(":",'')
+            mcu_name = wp.split(' ')[1:][0]
+        except Exception:
+            mcu_name = ''
+        util.set_thread_name("serialhdl %s" % (mcu_name))
         response = self.ffi_main.new('struct pull_queue_message *')
         while 1:
             self.ffi_lib.serialqueue_pull(self.serialqueue, response)
