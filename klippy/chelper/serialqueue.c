@@ -28,6 +28,8 @@
 #include "pollreactor.h" // pollreactor_alloc
 #include "pyhelper.h" // get_monotonic
 #include "serialqueue.h" // struct queue_message
+#include <linux/prctl.h>  // PR_SET_NAME
+#include <sys/prctl.h>  // prctl
 
 struct command_queue {
     struct list_head upcoming_queue, ready_queue;
@@ -612,6 +614,8 @@ static void *
 background_thread(void *data)
 {
     struct serialqueue *sq = data;
+    char name[16] = "serialqueue";
+    prctl(PR_SET_NAME, name);
     pollreactor_run(sq->pr);
 
     pthread_mutex_lock(&sq->lock);
