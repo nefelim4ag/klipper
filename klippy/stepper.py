@@ -6,6 +6,7 @@
 import math, logging, collections
 import threading, queue
 import chelper
+from util import set_thread_name
 
 class error(Exception):
     pass
@@ -63,6 +64,7 @@ class MCU_stepper:
         self._func_ready_q.put[None, None, None]
         self._itersolve_thread.join()
     def _offload_thread(self):
+        set_thread_name(self._name)
         while 1:
             f, sk, flush_time = self._func_ready_q.get(True)
             if f is None:
