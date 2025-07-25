@@ -224,3 +224,22 @@ def get_git_version(from_file=True):
     if from_file:
         git_info["version"] = get_version_from_file(klippy_src)
     return git_info
+
+def set_thread_name(name):
+    try:
+        import ctypes
+        from ctypes.util import find_library
+        libc_name = find_library("c")
+        if not libc_name:
+            libc_name = "libc.so.6"
+        libc = ctypes.CDLL(libc_name)
+        PR_SET_NAME = 15
+        libc.prctl.argtypes = [ctypes.c_int, ctypes.c_char_p,
+                              ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+        libc.prctl.restype = ctypes.c_int
+        name_short = name[:15]
+        result = libc.prctl(PR_SET_NAME, name_short.encode('utf-8'), 0, 0, 0)
+        if result != 0:
+            logging.info("prctl returned non-zero: %s" % (result))
+    except Exception as e:
+        logging.info("Unable to set thread name: %s" % (e))
