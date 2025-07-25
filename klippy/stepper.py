@@ -4,6 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import math, logging, collections
+import threading, queue
 import chelper
 
 class error(Exception):
@@ -53,6 +54,21 @@ class MCU_stepper:
         self._trapq = ffi_main.NULL
         self._mcu.get_printer().register_event_handler('klippy:connect',
                                                        self._query_mcu_position)
+        self._func_ready_q = queue.Queue()
+        self._func_resp_q = queue.Queue()
+        self._itersolve_thread = threading.Thread(target=self._offload_thread,
+                                                  name=self._name, daemon=True)
+        self._itersolve_thread.start()
+    def __del__(self):
+        self._func_ready_q.put[None, None, None]
+        self._itersolve_thread.join()
+    def _offload_thread(self):
+        while 1:
+            f, sk, flush_time = self._func_ready_q.get(True)
+            if f is None:
+                break
+            ret = f(sk, flush_time)
+            self._func_resp_q.put(ret)
     def get_mcu(self):
         return self._mcu
     def get_name(self, short=False):
@@ -253,8 +269,11 @@ class MCU_stepper:
                     cb(ret)
         # Generate steps
         sk = self._stepper_kinematics
-        ret = self._itersolve_generate_steps(sk, flush_time)
+        self._func_ready_q.put([
+            self._itersolve_generate_steps, sk, flush_time
+        ])
         def cb():
+            ret = self._func_resp_q.get()
             if ret:
                 raise error("Internal error in stepcompress")
         return [cb]
