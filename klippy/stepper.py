@@ -11,6 +11,41 @@ from util import set_thread_name
 class error(Exception):
     pass
 
+class OffloadExecutor:
+    def __init__(self, name):
+        self._name = name
+        self._work_event = threading.Event()
+        self._done_event = threading.Event()
+        self._shutdown = False
+        self._thread = threading.Thread(target=self._executor,
+                                        name=self._name,
+                                        daemon=True)
+        self._thread.start()
+        self._func = None
+        self._args = None
+        self._ret = None
+    def shutdown(self):
+        self._shutdown = True
+        self._work_event.set()
+        self._thread.join()
+    def schedule(self, f, *args):
+        self._func = f
+        self._args = args
+        self._work_event.set()
+    def result(self):
+        self._done_event.wait()
+        self._done_event.clear()
+        return self._ret
+    def _executor(self):
+        set_thread_name(self._name)
+        while not self._shutdown:
+            # Wait for work
+            self._work_event.wait()
+            if self._shutdown:
+                break
+            self._ret = self._func(*self._args)
+            self._work_event.clear()
+            self._done_event.set()
 
 ######################################################################
 # Steppers
@@ -55,22 +90,13 @@ class MCU_stepper:
         self._trapq = ffi_main.NULL
         self._mcu.get_printer().register_event_handler('klippy:connect',
                                                        self._query_mcu_position)
-        self._func_ready_q = queue.Queue()
-        self._func_resp_q = queue.Queue()
-        self._itersolve_thread = threading.Thread(target=self._offload_thread,
-                                                  name=self._name, daemon=True)
-        self._itersolve_thread.start()
-    def __del__(self):
-        self._func_ready_q.put[None, None, None]
-        self._itersolve_thread.join()
-    def _offload_thread(self):
-        set_thread_name(self._name)
-        while 1:
-            f, sk, flush_time = self._func_ready_q.get(True)
-            if f is None:
-                break
-            ret = f(sk, flush_time)
-            self._func_resp_q.put(ret)
+        # Thread offload executor
+        self._executor = OffloadExecutor(self._name)
+        printer = self._mcu.get_printer()
+        # printer.register_event_handler("klippy:firmware_restart",
+        #                                 self._executor.shutdown())
+        # printer.register_event_handler("klippy:shutdown",
+        #                                 self._executor.shutdown())
     def get_mcu(self):
         return self._mcu
     def get_name(self, short=False):
@@ -271,11 +297,11 @@ class MCU_stepper:
                     cb(ret)
         # Generate steps
         sk = self._stepper_kinematics
-        self._func_ready_q.put([
+        self._executor.schedule(
             self._itersolve_generate_steps, sk, flush_time
-        ])
+        )
         def cb():
-            ret = self._func_resp_q.get()
+            ret = self._executor.result()
             if ret:
                 raise error("Internal error in stepcompress")
         return [cb]
