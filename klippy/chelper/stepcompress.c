@@ -196,6 +196,96 @@ compress_bisect_add(struct stepcompress *sc)
     return (struct step_move){ bestinterval, bestcount, bestadd };
 }
 
+static struct step_move
+refit_step_move(struct stepcompress *sc, struct step_move move)
+{
+    if (move.count < 2)
+        return move;
+
+    uint32_t *pos = sc->queue_pos;
+    uint32_t lsc = sc->last_step_clock;
+
+    // Calculate current error metrics
+    double sum_error = 0, sum_sq_error = 0;
+    uint32_t interval = move.interval;
+    uint32_t p = 0;
+
+    for (int i = 0; i < move.count; i++) {
+        uint32_t target = pos[i] - lsc;
+        p += interval;
+        double error = (double)p - (double)target;
+        sum_error += error;
+        sum_sq_error += error * error;
+        interval += move.add;
+    }
+
+    // Try small adjustments to interval and add
+    struct step_move best_move = move;
+    double best_sq_error = sum_sq_error;
+
+    double Sii = 0, Sij = 0, Sjj = 0, Sib = 0, Sjb = 0;
+    for (int i = 0; i < move.count; i++) {
+        double i_d = (double)(i+1);            // 1-based step index
+        double j_d = i_d*(i_d-1)/2.0;
+        double b   = (double)(pos[i] - lsc);
+        Sii  += i_d*i_d;
+        Sij  += i_d*j_d;
+        Sjj  += j_d*j_d;
+        Sib  += i_d*b;
+        Sjb  += j_d*b;
+    }
+
+    double det = Sii*Sjj - Sij*Sij;
+    double theta0 = (  Sjj * Sib - Sij * Sjb) / det;
+    double theta1 = ( -Sij * Sib + Sii * Sjb) / det;
+
+    // fprintf(stderr, "i: %d->%f, a:%i -> %f\n", move.interval, theta0, move.add, theta1);
+
+    // Test range of interval adjustments
+    for (int di = -2; di <= 2; di++) {
+        for (int da = -1; da <= 1; da++) {
+            struct step_move test_move = {
+                .interval = theta0 + di,
+                .count = move.count,
+                .add = theta1 + da
+            };
+
+            // Quick validity check
+            if (test_move.interval <= 0 || test_move.interval >= 0x80000000)
+                continue;
+
+            // Check if this move stays within error bounds
+            interval = test_move.interval;
+            p = 0;
+            double test_sq_error = 0;
+            int valid = 1;
+
+            for (int i = 0; i < test_move.count && valid; i++) {
+                struct points point = minmax_point(sc, pos + i);
+                p += interval;
+
+                if (p < point.minp || p > point.maxp) {
+                    valid = 0;
+                    break;
+                }
+
+                uint32_t target = pos[i] - lsc;
+                double error = (double)p - (double)target;
+                test_sq_error += error * error;
+                interval += test_move.add;
+            }
+
+            if (valid && test_sq_error < best_sq_error) {
+                // fprintf(stderr, "success: move.i %d -> %d, move.a %i -> %i\n", best_move.interval, test_move.interval, best_move.add, test_move.add);
+                best_move = test_move;
+                best_sq_error = test_sq_error;
+            }
+        }
+    }
+
+    return best_move;
+}
+
 
 /****************************************************************
  * Step compress checking
@@ -381,6 +471,7 @@ queue_flush(struct stepcompress *sc, uint64_t move_clock)
         return 0;
     while (sc->last_step_clock < move_clock) {
         struct step_move move = compress_bisect_add(sc);
+        move = refit_step_move(sc, move);
         int ret = check_line(sc, move);
         if (ret)
             return ret;
