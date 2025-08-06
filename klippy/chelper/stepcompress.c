@@ -95,105 +95,116 @@ minmax_point(struct stepcompress *sc, uint32_t *pos)
     return (struct points){ point - max_error, point };
 }
 
-// The maximum add delta between two valid quadratic sequences of the
-// form "add*count*(count-1)/2 + interval*count" is "(6 + 4*sqrt(2)) *
-// maxerror / (count*count)".  The "6 + 4*sqrt(2)" is 11.65685, but
-// using 11 works well in practice.
-#define QUADRATIC_DEV 11
 
 // Find a 'step_move' that covers a series of step times
+// Fit quadric function
 static struct step_move
 compress_bisect_add(struct stepcompress *sc)
 {
+    const uint32_t max_count = 0xffff;
     uint32_t *qlast = sc->queue_next;
-    if (qlast > sc->queue_pos + 65535)
-        qlast = sc->queue_pos + 65535;
-    struct points point = minmax_point(sc, sc->queue_pos);
-    int32_t outer_mininterval = point.minp, outer_maxinterval = point.maxp;
-    int32_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
-    int32_t bestinterval = 0, bestcount = 1, bestadd = 1, bestreach = INT32_MIN;
-    int32_t zerointerval = 0, zerocount = 0;
+    if (qlast > sc->queue_pos + max_count)
+        qlast = sc->queue_pos + max_count;
+    uint32_t *pos = sc->queue_pos;
+    uint32_t lsc = sc->last_step_clock;
+    uint32_t point = *pos - lsc;
+    uint32_t prevpoint = pos > sc->queue_pos ? *(pos-1) - lsc : 0;
+    int64_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
 
-    for (;;) {
-        // Find longest valid sequence with the given 'add'
-        struct points nextpoint;
-        int32_t nextmininterval = outer_mininterval;
-        int32_t nextmaxinterval = outer_maxinterval, interval = nextmaxinterval;
-        int32_t nextcount = 1;
-        for (;;) {
-            nextcount++;
-            if (&sc->queue_pos[nextcount-1] >= qlast) {
-                int32_t count = nextcount - 1;
-                return (struct step_move){ interval, count, add };
-            }
-            nextpoint = minmax_point(sc, sc->queue_pos + nextcount - 1);
-            int32_t nextaddfactor = nextcount*(nextcount-1)/2;
-            int32_t c = add*nextaddfactor;
-            if (nextmininterval*nextcount < nextpoint.minp - c)
-                nextmininterval = idiv_up(nextpoint.minp - c, nextcount);
-            if (nextmaxinterval*nextcount > nextpoint.maxp - c)
-                nextmaxinterval = idiv_down(nextpoint.maxp - c, nextcount);
-            if (nextmininterval > nextmaxinterval)
-                break;
-            interval = nextmaxinterval;
-        }
+    struct step_move best_move = {
+        .interval = pos[0] - lsc,
+        .count = 1,
+        .add = 0,
+    };
 
-        // Check if this is the best sequence found so far
-        int32_t count = nextcount - 1, addfactor = count*(count-1)/2;
-        int32_t reach = add*addfactor + interval*count;
-        if (reach > bestreach
-            || (reach == bestreach && interval > bestinterval)) {
-            bestinterval = interval;
-            bestcount = count;
-            bestadd = add;
-            bestreach = reach;
-            if (!add) {
-                zerointerval = interval;
-                zerocount = count;
-            }
-            if (count > 0x200)
-                // No 'add' will improve sequence; avoid integer overflow
-                break;
-        }
+    if (qlast - sc->queue_pos == 1)
+        goto out;
 
-        // Check if a greater or lesser add could extend the sequence
-        int32_t nextaddfactor = nextcount*(nextcount-1)/2;
-        int32_t nextreach = add*nextaddfactor + interval*nextcount;
-        if (nextreach < nextpoint.minp) {
-            minadd = add + 1;
-            outer_maxinterval = nextmaxinterval;
-        } else {
-            maxadd = add - 1;
-            outer_mininterval = nextmininterval;
-        }
+    // Try perfect fit 2 points
+    add = (int32_t)(pos[1] - lsc) - 2 * best_move.interval;
+    if (add <= minadd || add >= maxadd)
+        goto out;
 
-        // The maximum valid deviation between two quadratic sequences
-        // can be calculated and used to further limit the add range.
-        if (count > 1) {
-            int32_t errdelta = sc->max_error*QUADRATIC_DEV / (count*count);
-            if (minadd < add - errdelta)
-                minadd = add - errdelta;
-            if (maxadd > add + errdelta)
-                maxadd = add + errdelta;
-        }
+    best_move.count = 2;
+    best_move.add = add;
+    if (qlast - sc->queue_pos == 2)
+        goto out;
 
-        // See if next point would further limit the add range
-        int32_t c = outer_maxinterval * nextcount;
-        if (minadd*nextaddfactor < nextpoint.minp - c)
-            minadd = idiv_up(nextpoint.minp - c, nextaddfactor);
-        c = outer_mininterval * nextcount;
-        if (maxadd*nextaddfactor > nextpoint.maxp - c)
-            maxadd = idiv_down(nextpoint.maxp - c, nextaddfactor);
+    // int32_t addfactor = best_move.count * (best_move.count-1) / 2;
+    // uint32_t predicted = lsc + best_move.interval * best_move.count + best_move.add * addfactor;
+    // uint32_t actual = pos[1];
 
-        // Bisect valid add range and try again with new 'add'
-        if (minadd > maxadd)
-            break;
-        add = maxadd - (maxadd - minadd) / 4;
+    // Try Linear Least Squares Fit
+    // Presolve 2 iterations for clarity
+    double Sii = 0;
+    double Sij = 0;
+    double Sjj = 0;
+    double Sib = 0;
+    double Sjb = 0;
+    double id, jd, b;
+    for (int i = 0; i < 2; i++) {
+        id = i + 1;
+        jd = id * (id - 1) / 2;
+        b = (int64_t)pos[i] - (int64_t)lsc;
+        Sii += id * id;
+        Sij += id * jd;
+        Sjj += jd * jd;
+        Sib += id * b;
+        Sjb += jd * b;
     }
-    if (zerocount + zerocount/16 >= bestcount)
-        // Prefer add=0 if it's similar to the best found sequence
-        return (struct step_move){ zerointerval, zerocount, 0 };
-    return (struct step_move){ bestinterval, bestcount, bestadd };
+
+    for (int i = 2; i < max_count; i++) {
+        id = i + 1;
+        jd = id * (id - 1) / 2;
+        b = (int64_t)pos[i] - (int64_t)lsc;
+
+        Sii += id * id;
+        Sij += id * jd;
+        Sjj += jd * jd;
+        Sib += id * b;
+        Sjb += jd * b;
+
+        double det = Sii * Sjj - Sij * Sij;
+        if (det == 0.0)
+            goto out;
+
+        double I = (Sjj * Sib - Sij * Sjb) / det;
+        double A = (-Sij * Sib + Sii * Sjb) / det;
+
+        if (I < .0 || I > 0x80000000)
+            goto out;
+        if (A <= minadd || A >= maxadd)
+            goto out;
+        add = llround(A);
+
+        // struct points point = minmax_point(sc, sc->queue_pos + i);
+        // int64_t addfactor = (int64_t)i * (i - 1) / 2;
+        // int64_t predicted = lsc + interval * i + d_add * addfactor;
+        // uint32_t actual = pos[i];
+
+        // if (predicted <= p.minp || predicted >= p.maxp)
+        //     goto out;
+
+        uint32_t p = 0;
+        uint32_t t_interval = llround(I);
+        for (uint32_t c=0; c<i; c++) {
+            struct points point = minmax_point(sc, sc->queue_pos + c);
+            p += t_interval;
+            if (p < point.minp || p > point.maxp)
+                goto out;
+            if (t_interval >= 0x80000000)
+                goto out;
+            t_interval += add;
+        }
+
+        // Valid fit so far
+        best_move.count = i;
+        best_move.interval = llround(I);
+        best_move.add = add;
+    }
+
+out:
+    return best_move;
 }
 
 
