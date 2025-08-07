@@ -373,6 +373,61 @@ add_move(struct stepcompress *sc, uint64_t first_clock, struct step_move *move)
     list_add_head(&hs->node, &sc->history_list);
 }
 
+
+static uint32_t
+get_interval_variation(struct stepcompress *sc, struct step_move move)
+{
+    uint32_t lsc = sc->last_step_clock;
+    uint32_t T1 = lsc + sc->queue_pos[move.count-2];
+    uint32_t T2 = lsc + sc->queue_pos[move.count-1];
+    uint32_t first_interval = T2 - T1;
+    uint32_t last_interval = move.interval + move.add * (move.count - 1);
+    // fprintf(stderr, "f: %d, l: %d\n", first_interval, last_interval);
+    if (last_interval > first_interval)
+        return last_interval - first_interval;
+    else
+        return first_interval - last_interval;
+}
+
+// Post bisect correction hook
+static struct step_move
+refit_sawtooth(struct stepcompress *sc, struct step_move move)
+{
+    if (move.count <= 2)
+        return move;
+
+    uint32_t last_variation = get_interval_variation(sc, move);
+    // fprintf(stderr, "variation: %d\n", last_variation);
+
+    // If the interval variation within this move is already smooth, keep it
+    uint32_t max_variation = 4;
+    if (last_variation <= max_variation)
+        return move;
+
+    // Try reducing count until variation is acceptable
+    uint32_t best_variation = last_variation;
+
+    while (move.count > 2) {
+        move.count--;
+        uint32_t current_variation = get_interval_variation(sc, move);
+
+        if (current_variation < best_variation) {
+            // Improvement found
+            best_variation = current_variation;
+            // If we're now within smooth bounds, stop here
+            if (current_variation < max_variation)
+                break;
+        } else {
+            // No improvement, stop trying
+            move.count++;
+            break;
+        }
+    }
+
+    return move;
+}
+
+
 // Convert previously scheduled steps into commands for the mcu
 static int
 queue_flush(struct stepcompress *sc, uint64_t move_clock)
@@ -381,6 +436,7 @@ queue_flush(struct stepcompress *sc, uint64_t move_clock)
         return 0;
     while (sc->last_step_clock < move_clock) {
         struct step_move move = compress_bisect_add(sc);
+        move = refit_sawtooth(sc, move);
         int ret = check_line(sc, move);
         if (ret)
             return ret;
