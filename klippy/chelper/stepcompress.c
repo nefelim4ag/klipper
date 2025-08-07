@@ -72,6 +72,12 @@ struct points {
     int32_t minp, maxp;
 };
 
+struct lls_state {
+    double Snn, Snq, Sqq;  // Sum matrices
+    double Snt, Sqt;       // Cross terms
+    uint32_t n_points;     // Current number of points
+};
+
 // Given a requested step time, return the minimum and maximum
 // acceptable times
 static inline struct points
@@ -85,6 +91,35 @@ minmax_point(struct stepcompress *sc, uint32_t *pos)
     return (struct points){ point - max_error, point };
 }
 
+// Add a point to LLS calculation
+static void lls_add_point(struct lls_state *state, uint32_t point_index,
+                         uint32_t time_from_ref) {
+    double n = point_index + 1;
+    double q = n * (n - 1) / 2;
+    double t = time_from_ref;
+
+    state->Snn += n * n;
+    state->Snq += n * q;
+    state->Sqq += q * q;
+    state->Snt += n * t;
+    state->Sqt += q * t;
+    state->n_points++;
+}
+
+// Remove a point from LLS calculation
+static void lls_remove_point(struct lls_state *state, uint32_t point_index,
+                            uint32_t time_from_ref) {
+    double n = point_index + 1;
+    double q = n * (n - 1) / 2;
+    double t = time_from_ref;
+
+    state->Snn -= n * n;
+    state->Snq -= n * q;
+    state->Sqq -= q * q;
+    state->Snt -= n * t;
+    state->Sqt -= q * t;
+    state->n_points--;
+}
 
 // Find a 'step_move' that covers a series of step times
 // Fit quadric function
@@ -160,119 +195,119 @@ compress_bisect_add(struct stepcompress *sc)
     // Linear Least Squares
     // Exponential search
     // Sum of i*i & etc
-    double Snn = 0, Snq = 0, Sqq = 0;  // n, quadratic term sums
-    double Snt = 0, Sqt = 0;           // cross terms with time
-    uint32_t n_points = 0;
+    // Math magic, I would say
+    struct lls_state S = {
+      .Snn = .0,
+      .Snq = .0,
+      .Sqq = .0,
+      .Snt = .0,
+      .Sqt = .0,
+      .n_points = 0,
+    };
+
     uint32_t slack = sc->max_error;
     uint32_t I_lo = move.interval > slack ? move.interval - slack : 1;
     uint32_t I_hi = move.interval + slack;
-    for (int k = 4; k <= steps; k = k * 2) {
-        for (; n_points < k && n_points < steps; n_points++) {
-            double n = n_points + 1;
-            double q = n * (n - 1) / 2;  // quadratic term
-            double t = pos[n_points] - lsc;  // actual time from reference
-
-            Snn += n * n;
-            Snq += n * q;
-            Sqq += q * q;
-            Snt += n * t;
-            Sqt += q * t;
+    uint32_t i = 0;
+    // Fast exponential pass
+    for (int k = 4; k < steps; k = k *2) {
+        if (k > steps)
+            k = steps;
+        for (; i < k; i++) {
+            lls_add_point(&S, i, pos[i] - lsc);
         }
-        double det = Snn * Sqq - Snq * Snq;
-        if (det == 0) {
-            // singular
-            // fprintf(stderr, "call_id:\t%i| singular =( \n)", call_id);
-            goto backward_pass;
+
+        double det = S.Snn * S.Sqq - S.Snq * S.Snq;
+        if (det <= .0) {
+            fprintf(stderr, "call_id:\t%i| singular =( \n)", call_id);
+            break;
         }
 
         // Cramer's rule
-        double numI = Sqq * Snt - Snq * Sqt;
-        double numA = Snn * Sqt - Snq * Snt;
-        int32_t I_fit = numI / det;
-        int32_t A_fit = numA / det;
-        if (I_fit < I_lo || I_fit > I_hi) {
-            // fprintf(stderr, "call_id:\t%i| %d < I_lo: %i ||  %d > I_hi: %i\n", call_id, I_fit, I_lo, I_fit, I_hi);
-            goto backward_pass;
-        }
-
-        uint32_t p = 0;
-        uint32_t t_interval = I_fit;
-        for (uint32_t c=0; c<n_points; c++) {
-            struct points point = minmax_point(sc, sc->queue_pos + c);
-            p += t_interval;
-            if (p < point.minp) {
-                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d || %d > %d\n", call_id, p, point.minp, p, point.maxp);
-                goto backward_pass;
-            }
-            if (p > point.maxp) {
-                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d || %d > %d\n", call_id, p, point.minp, p, point.maxp);
-                goto backward_pass;
-            }
-            t_interval += A_fit;
-        }
-        // fprintf(stderr, "k: %i, I_fit: %li, A_fit: %li\n", k, I_fit, A_fit);
-        move.add = A_fit;
-        move.interval = I_fit;
-        move.count = n_points;
-    }
-
-backward_pass:
-    while (n_points > 4 && n_points > move.count) {
-        // rollback half of a range
-        uint32_t half = move.count + (n_points - move.count)/2;
-        while (n_points > half) {
-            double n = n_points + 1;
-            double q = n * (n - 1) / 2;
-            double t = pos[n_points] - lsc;
-
-            Snn -= n * n;
-            Snq -= n * q;
-            Sqq -= q * q;
-            Snt -= n * t;
-            Sqt -= q * t;
-            n_points--;
-        }
-
-        double det = Snn * Sqq - Snq * Snq;
-
-        double numI = Sqq * Snt - Snq * Sqt;
-        double numA = Snn * Sqt - Snq * Snt;
+        double numI = S.Sqq * S.Snt - S.Snq * S.Sqt;
+        double numA = S.Snn * S.Sqt - S.Snq * S.Snt;
         int32_t I_fit = numI / det;
         int32_t A_fit = numA / det;
 
-        if (I_fit < I_lo || I_fit > I_hi) {
-            // fprintf(stderr, "call_id:\t%i| %d < I_lo: %i ||  %d > I_hi: %i\n", call_id, I_fit, I_lo, I_fit, I_hi);
-            continue;
-        }
         uint32_t p = 0;
         uint32_t t_interval = I_fit;
         uint32_t c = 0;
-        for (; c < n_points; c++) {
+        for (; c < S.n_points; c++) {
             struct points point = minmax_point(sc, sc->queue_pos + c);
             p += t_interval;
             if (p < point.minp) {
-                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d || %d > %d\n", call_id, p, point.minp, p, point.maxp);
+                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d \n", call_id, p, point.minp);
                 break;
             }
             if (p > point.maxp) {
-                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d || %d > %d\n", call_id, p, point.minp, p, point.maxp);
+                // fprintf(stderr, "call_id:\t%i| bounds: %d > %d\n", call_id, p, point.maxp);
                 break;
             }
             t_interval += A_fit;
         }
-
-        if (c < n_points)
-            continue;
-        // fprintf(stderr, "call_id:\t%i| backward pass k: %i, I_fit: %i, A_fit: %i\n", call_id, n_points, I_fit, A_fit);
-        move.add = A_fit;
-        move.interval = I_fit;
-        move.count = n_points;
-        break;
+        if (c < S.n_points)
+            break;
     }
 
-    // int32_t addfactor = best_move.count * (best_move.count-1) / 2;
-    // uint32_t predicted = lsc + best_move.interval * best_move.count + best_move.add * addfactor;
-    // uint32_t actual = pos[1];
+    steps = i;
+
+
+    uint32_t left = 2;
+    uint32_t right = steps;
+    uint32_t mid = 0;
+    // Binary search pass
+    while (left < right) {
+        mid = left + (right - left) / 2;
+        // fprintf(stderr, "call_id:\t%i| left: %d, right: %d\n", call_id, left, right);
+        for (; i < mid; i++) {
+            lls_add_point(&S, i, pos[i] - lsc);
+        }
+        for (; i > mid; i--) {
+            lls_remove_point(&S, i, pos[i] - lsc);
+        }
+
+        double det = S.Snn * S.Sqq - S.Snq * S.Snq;
+        if (det == 0) {
+            // singular
+            // fprintf(stderr, "call_id:\t%i| singular =( \n)", call_id);
+            right = mid - 1;
+            continue;
+        }
+
+        // Cramer's rule
+        double numI = S.Sqq * S.Snt - S.Snq * S.Sqt;
+        double numA = S.Snn * S.Sqt - S.Snq * S.Snt;
+        int32_t I_fit = numI / det;
+        int32_t A_fit = numA / det;
+
+        uint32_t p = 0;
+        uint32_t t_interval = I_fit;
+        uint32_t c = 0;
+        for (; c < S.n_points; c++) {
+            struct points point = minmax_point(sc, sc->queue_pos + c);
+            p += t_interval;
+            if (p < point.minp) {
+                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d \n", call_id, p, point.minp);
+                break;
+            }
+            if (p > point.maxp) {
+                // fprintf(stderr, "call_id:\t%i| bounds: %d > %d\n", call_id, p, point.maxp);
+                break;
+            }
+            t_interval += A_fit;
+        }
+        if (c < S.n_points) {
+            right = mid - 1;
+            continue;
+        }
+
+        // Match, try further
+        left = mid + 1;
+        // fprintf(stderr, "call_id:\t%i| k: %i, I_fit: %i, A_fit: %i\n", call_id, S.n_points, I_fit, A_fit);
+        move.add = A_fit;
+        move.interval = I_fit;
+        move.count = S.n_points;
+    }
 out:
     sc->knot -= move.count;
     // fprintf(stderr, "call_id:\t%i| m.c: %d, m:i: %d, m:a %i\n", call_id, move.count, move.interval, move.add);
