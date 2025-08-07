@@ -166,9 +166,9 @@ compress_bisect_add(struct stepcompress *sc)
     uint32_t slack = sc->max_error;
     uint32_t I_lo = move.interval > slack ? move.interval - slack : 1;
     uint32_t I_hi = move.interval + slack;
-    for (int k = 4; k < steps; k = k * 2) {
+    for (int k = 4; k <= steps; k = k * 2) {
         for (; n_points < k && n_points < steps; n_points++) {
-            uint32_t n = n_points + 1;
+            double n = n_points + 1;
             double q = n * (n - 1) / 2;  // quadratic term
             double t = pos[n_points] - lsc;  // actual time from reference
 
@@ -182,17 +182,17 @@ compress_bisect_add(struct stepcompress *sc)
         if (det == 0) {
             // singular
             // fprintf(stderr, "call_id:\t%i| singular =( \n)", call_id);
-            goto out;
+            goto backward_pass;
         }
 
         // Cramer's rule
         double numI = Sqq * Snt - Snq * Sqt;
         double numA = Snn * Sqt - Snq * Snt;
-        int32_t I_fit = (int32_t)(numI / det);
-        int32_t A_fit = (int32_t)(numA / det);
+        int32_t I_fit = numI / det;
+        int32_t A_fit = numA / det;
         if (I_fit < I_lo || I_fit > I_hi) {
             // fprintf(stderr, "call_id:\t%i| %d < I_lo: %i ||  %d > I_hi: %i\n", call_id, I_fit, I_lo, I_fit, I_hi);
-            goto out;
+            goto backward_pass;
         }
 
         uint32_t p = 0;
@@ -202,14 +202,12 @@ compress_bisect_add(struct stepcompress *sc)
             p += t_interval;
             if (p < point.minp) {
                 // fprintf(stderr, "call_id:\t%i| bounds: %d < %d || %d > %d\n", call_id, p, point.minp, p, point.maxp);
-                goto out;
+                goto backward_pass;
             }
             if (p > point.maxp) {
                 // fprintf(stderr, "call_id:\t%i| bounds: %d < %d || %d > %d\n", call_id, p, point.minp, p, point.maxp);
-                goto out;
+                goto backward_pass;
             }
-            if (t_interval >= 0x80000000)
-                goto out;
             t_interval += A_fit;
         }
         // fprintf(stderr, "k: %i, I_fit: %li, A_fit: %li\n", k, I_fit, A_fit);
@@ -218,6 +216,59 @@ compress_bisect_add(struct stepcompress *sc)
         move.count = n_points;
     }
 
+backward_pass:
+    while (n_points > 4 && n_points > move.count) {
+        // rollback half of a range
+        uint32_t half = move.count + (n_points - move.count)/2;
+        while (n_points > half) {
+            double n = n_points + 1;
+            double q = n * (n - 1) / 2;
+            double t = pos[n_points] - lsc;
+
+            Snn -= n * n;
+            Snq -= n * q;
+            Sqq -= q * q;
+            Snt -= n * t;
+            Sqt -= q * t;
+            n_points--;
+        }
+
+        double det = Snn * Sqq - Snq * Snq;
+
+        double numI = Sqq * Snt - Snq * Sqt;
+        double numA = Snn * Sqt - Snq * Snt;
+        int32_t I_fit = numI / det;
+        int32_t A_fit = numA / det;
+
+        if (I_fit < I_lo || I_fit > I_hi) {
+            // fprintf(stderr, "call_id:\t%i| %d < I_lo: %i ||  %d > I_hi: %i\n", call_id, I_fit, I_lo, I_fit, I_hi);
+            continue;
+        }
+        uint32_t p = 0;
+        uint32_t t_interval = I_fit;
+        uint32_t c = 0;
+        for (; c < n_points; c++) {
+            struct points point = minmax_point(sc, sc->queue_pos + c);
+            p += t_interval;
+            if (p < point.minp) {
+                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d || %d > %d\n", call_id, p, point.minp, p, point.maxp);
+                break;
+            }
+            if (p > point.maxp) {
+                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d || %d > %d\n", call_id, p, point.minp, p, point.maxp);
+                break;
+            }
+            t_interval += A_fit;
+        }
+
+        if (c < n_points)
+            continue;
+        // fprintf(stderr, "call_id:\t%i| backward pass k: %i, I_fit: %i, A_fit: %i\n", call_id, n_points, I_fit, A_fit);
+        move.add = A_fit;
+        move.interval = I_fit;
+        move.count = n_points;
+        break;
+    }
 
     // int32_t addfactor = best_move.count * (best_move.count-1) / 2;
     // uint32_t predicted = lsc + best_move.interval * best_move.count + best_move.add * addfactor;
