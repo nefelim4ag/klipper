@@ -46,6 +46,8 @@ struct stepcompress {
     // History tracking
     int64_t last_position;
     struct list_head history_list;
+    // Compression state
+    int knot;
 };
 
 struct step_move {
@@ -65,18 +67,6 @@ struct history_steps {
 /****************************************************************
  * Step compression
  ****************************************************************/
-
-static inline int32_t
-idiv_up(int32_t n, int32_t d)
-{
-    return (n>=0) ? DIV_ROUND_UP(n,d) : (n/d);
-}
-
-static inline int32_t
-idiv_down(int32_t n, int32_t d)
-{
-    return (n>=0) ? (n/d) : (n - d + 1) / d;
-}
 
 struct points {
     int32_t minp, maxp;
@@ -98,6 +88,7 @@ minmax_point(struct stepcompress *sc, uint32_t *pos)
 
 // Find a 'step_move' that covers a series of step times
 // Fit quadric function
+static int call_id = 0;
 static struct step_move
 compress_bisect_add(struct stepcompress *sc)
 {
@@ -118,111 +109,122 @@ compress_bisect_add(struct stepcompress *sc)
         .count = 1,
         .add = 0,
     };
-    fprintf(stderr, "fuck\n");
+    call_id++;
+
     if (steps == 1)
         goto out;
 
     // Try perfect fit 2 points
-    add = pos[1] - pos[0] - move.interval;
-    fprintf(stderr, "I0: %d, I1: %d\n", pos[1] - pos[0], move.interval);
-    if (add <= minadd || add >= maxadd)
+    {
+        int32_t I0 = move.interval;
+        int32_t I1 = pos[1] - pos[0];
+        add = I1 - I0;
+    }
+
+    // knot
+    if (add <= minadd || add >= maxadd) {
+        // fprintf(stderr, "call_id:\t%i| knot, add: %i\n", call_id, add);
         goto out;
+    }
+
 
     move.count = 2;
     move.add = add;
-    if (steps == 2)
+    if (steps == 2) {
+        // fprintf(stderr, "call_id:\t%i| only 2 steps avaliable\n", call_id);
         goto out;
+    }
 
     // Knot scan
-    {
+    if (sc->knot <= 0) {
         uint32_t I_prev = pos[1] - pos[0];
         uint32_t i = 2;
+        uint32_t I_sum = I_prev;
         while (i < steps) {
             uint32_t I = pos[i] - pos[i-1];
+            I_sum += I;
             int32_t add = (int32_t)I - (int32_t)I_prev;
             if (add <= minadd || add >= maxadd)
                 break;
+            // Limit I for simplified math in LLS
+            if (I_sum > 0x80000000)
+                break;
             I_prev = I;
+            i++;
         }
-        steps = i;
-        fprintf(stderr, "aval_steps: %d\n", steps);
+        steps = i-1;
+        sc->knot = i;
+        // fprintf(stderr, "aval_steps: %d\n", steps);
+    }
+
+    // Linear Least Squares
+    // Exponential search
+    // Sum of i*i & etc
+    double Snn = 0, Snq = 0, Sqq = 0;  // n, quadratic term sums
+    double Snt = 0, Sqt = 0;           // cross terms with time
+    uint32_t n_points = 0;
+    uint32_t slack = sc->max_error;
+    uint32_t I_lo = move.interval > slack ? move.interval - slack : 1;
+    uint32_t I_hi = move.interval + slack;
+    for (int k = 4; k < steps; k = k * 2) {
+        for (; n_points < k && n_points < steps; n_points++) {
+            uint32_t n = n_points + 1;
+            double q = n * (n - 1) / 2;  // quadratic term
+            double t = pos[n_points] - lsc;  // actual time from reference
+
+            Snn += n * n;
+            Snq += n * q;
+            Sqq += q * q;
+            Snt += n * t;
+            Sqt += q * t;
+        }
+        double det = Snn * Sqq - Snq * Snq;
+        if (det == 0) {
+            // singular
+            // fprintf(stderr, "call_id:\t%i| singular =( \n)", call_id);
+            goto out;
+        }
+
+        // Cramer's rule
+        double numI = Sqq * Snt - Snq * Sqt;
+        double numA = Snn * Sqt - Snq * Snt;
+        int32_t I_fit = (int32_t)(numI / det);
+        int32_t A_fit = (int32_t)(numA / det);
+        if (I_fit < I_lo || I_fit > I_hi) {
+            // fprintf(stderr, "call_id:\t%i| %d < I_lo: %i ||  %d > I_hi: %i\n", call_id, I_fit, I_lo, I_fit, I_hi);
+            goto out;
+        }
+
+        uint32_t p = 0;
+        uint32_t t_interval = I_fit;
+        for (uint32_t c=0; c<n_points; c++) {
+            struct points point = minmax_point(sc, sc->queue_pos + c);
+            p += t_interval;
+            if (p < point.minp) {
+                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d || %d > %d\n", call_id, p, point.minp, p, point.maxp);
+                goto out;
+            }
+            if (p > point.maxp) {
+                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d || %d > %d\n", call_id, p, point.minp, p, point.maxp);
+                goto out;
+            }
+            if (t_interval >= 0x80000000)
+                goto out;
+            t_interval += A_fit;
+        }
+        // fprintf(stderr, "k: %i, I_fit: %li, A_fit: %li\n", k, I_fit, A_fit);
+        move.add = A_fit;
+        move.interval = I_fit;
+        move.count = n_points;
     }
 
 
     // int32_t addfactor = best_move.count * (best_move.count-1) / 2;
     // uint32_t predicted = lsc + best_move.interval * best_move.count + best_move.add * addfactor;
     // uint32_t actual = pos[1];
-
-    // Try Linear Least Squares Fit
-    // Presolve 2 iterations for clarity
-    // double Sii = 0;
-    // double Sij = 0;
-    // double Sjj = 0;
-    // double Sib = 0;
-    // double Sjb = 0;
-    // double id, jd, b;
-    // for (int i = 0; i < 2; i++) {
-    //     id = i + 1;
-    //     jd = id * (id - 1) / 2;
-    //     b = (int64_t)pos[i] - (int64_t)lsc;
-    //     Sii += id * id;
-    //     Sij += id * jd;
-    //     Sjj += jd * jd;
-    //     Sib += id * b;
-    //     Sjb += jd * b;
-    // }
-
-    // for (int i = 2; i < 32; i++) {
-    //     id = i + 1;
-    //     jd = id * (id - 1) / 2;
-    //     b = (int64_t)pos[i] - (int64_t)lsc;
-
-    //     Sii += id * id;
-    //     Sij += id * jd;
-    //     Sjj += jd * jd;
-    //     Sib += id * b;
-    //     Sjb += jd * b;
-
-    //     double det = Sii * Sjj - Sij * Sij;
-    //     if (det == 0.0)
-    //         goto out;
-
-    //     double I = (Sjj * Sib - Sij * Sjb) / det;
-    //     double A = (-Sij * Sib + Sii * Sjb) / det;
-
-    //     if (I < .0 || I > 0x80000000)
-    //         goto out;
-    //     if (A <= minadd || A >= maxadd)
-    //         goto out;
-    //     add = llround(A);
-
-    //     // struct points point = minmax_point(sc, sc->queue_pos + i);
-    //     // int64_t addfactor = (int64_t)i * (i - 1) / 2;
-    //     // int64_t predicted = lsc + interval * i + d_add * addfactor;
-    //     // uint32_t actual = pos[i];
-
-    //     // if (predicted <= p.minp || predicted >= p.maxp)
-    //     //     goto out;
-
-    //     uint32_t p = 0;
-    //     uint32_t t_interval = llround(I);
-    //     for (uint32_t c=0; c<i; c++) {
-    //         struct points point = minmax_point(sc, sc->queue_pos + c);
-    //         p += t_interval;
-    //         if (p < point.minp || p > point.maxp)
-    //             goto out;
-    //         if (t_interval >= 0x80000000)
-    //             goto out;
-    //         t_interval += add;
-    //     }
-
-    //     // Valid fit so far
-    //     best_move.count = i;
-    //     best_move.interval = llround(I);
-    //     best_move.add = add;
-    // }
-
 out:
+    sc->knot -= move.count;
+    // fprintf(stderr, "call_id:\t%i| m.c: %d, m:i: %d, m:a %i\n", call_id, move.count, move.interval, move.add);
     return move;
 }
 
@@ -402,61 +404,6 @@ add_move(struct stepcompress *sc, uint64_t first_clock, struct step_move *move)
     sc->last_position += hs->step_count;
     list_add_head(&hs->node, &sc->history_list);
 }
-
-
-// static uint32_t
-// get_interval_variation(struct stepcompress *sc, struct step_move move)
-// {
-//     uint32_t lsc = sc->last_step_clock;
-//     uint32_t T1 = lsc + sc->queue_pos[move.count-2];
-//     uint32_t T2 = lsc + sc->queue_pos[move.count-1];
-//     uint32_t first_interval = T2 - T1;
-//     uint32_t last_interval = move.interval + move.add * (move.count - 1);
-//     // fprintf(stderr, "f: %d, l: %d\n", first_interval, last_interval);
-//     if (last_interval > first_interval)
-//         return last_interval - first_interval;
-//     else
-//         return first_interval - last_interval;
-// }
-
-// // Post bisect correction hook
-// static struct step_move
-// refit_sawtooth(struct stepcompress *sc, struct step_move move)
-// {
-//     if (move.count <= 2)
-//         return move;
-
-//     uint32_t last_variation = get_interval_variation(sc, move);
-//     // fprintf(stderr, "variation: %d\n", last_variation);
-
-//     // If the interval variation within this move is already smooth, keep it
-//     uint32_t max_variation = 4;
-//     if (last_variation <= max_variation)
-//         return move;
-
-//     // Try reducing count until variation is acceptable
-//     uint32_t best_variation = last_variation;
-
-//     while (move.count > 2) {
-//         move.count--;
-//         uint32_t current_variation = get_interval_variation(sc, move);
-
-//         if (current_variation < best_variation) {
-//             // Improvement found
-//             best_variation = current_variation;
-//             // If we're now within smooth bounds, stop here
-//             if (current_variation < max_variation)
-//                 break;
-//         } else {
-//             // No improvement, stop trying
-//             move.count++;
-//             break;
-//         }
-//     }
-
-//     return move;
-// }
-
 
 // Convert previously scheduled steps into commands for the mcu
 static int
