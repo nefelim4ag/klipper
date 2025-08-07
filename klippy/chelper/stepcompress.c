@@ -101,34 +101,53 @@ minmax_point(struct stepcompress *sc, uint32_t *pos)
 static struct step_move
 compress_bisect_add(struct stepcompress *sc)
 {
-    const uint32_t max_count = 0xffff;
+    uint32_t steps = 0xffff;
     uint32_t *qlast = sc->queue_next;
-    if (qlast > sc->queue_pos + max_count)
-        qlast = sc->queue_pos + max_count;
+    if (qlast > sc->queue_pos + steps)
+        qlast = sc->queue_pos + steps;
+    steps = qlast - sc->queue_pos;
+
     uint32_t *pos = sc->queue_pos;
     uint32_t lsc = sc->last_step_clock;
-    uint32_t point = *pos - lsc;
-    uint32_t prevpoint = pos > sc->queue_pos ? *(pos-1) - lsc : 0;
-    int64_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
+    int32_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
+    // uint32_t point = *pos - lsc;
+    // uint32_t prevpoint = pos > sc->queue_pos ? *(pos-1) - lsc : 0;
 
-    struct step_move best_move = {
+    struct step_move move = {
         .interval = pos[0] - lsc,
         .count = 1,
         .add = 0,
     };
-
-    if (qlast - sc->queue_pos == 1)
+    fprintf(stderr, "fuck\n");
+    if (steps == 1)
         goto out;
 
     // Try perfect fit 2 points
-    add = (int32_t)(pos[1] - lsc) - 2 * best_move.interval;
+    add = pos[1] - pos[0] - move.interval;
+    fprintf(stderr, "I0: %d, I1: %d\n", pos[1] - pos[0], move.interval);
     if (add <= minadd || add >= maxadd)
         goto out;
 
-    best_move.count = 2;
-    best_move.add = add;
-    if (qlast - sc->queue_pos == 2)
+    move.count = 2;
+    move.add = add;
+    if (steps == 2)
         goto out;
+
+    // Knot scan
+    {
+        uint32_t I_prev = pos[1] - pos[0];
+        uint32_t i = 2;
+        while (i < steps) {
+            uint32_t I = pos[i] - pos[i-1];
+            int32_t add = (int32_t)I - (int32_t)I_prev;
+            if (add <= minadd || add >= maxadd)
+                break;
+            I_prev = I;
+        }
+        steps = i;
+        fprintf(stderr, "aval_steps: %d\n", steps);
+    }
+
 
     // int32_t addfactor = best_move.count * (best_move.count-1) / 2;
     // uint32_t predicted = lsc + best_move.interval * best_move.count + best_move.add * addfactor;
@@ -136,75 +155,75 @@ compress_bisect_add(struct stepcompress *sc)
 
     // Try Linear Least Squares Fit
     // Presolve 2 iterations for clarity
-    double Sii = 0;
-    double Sij = 0;
-    double Sjj = 0;
-    double Sib = 0;
-    double Sjb = 0;
-    double id, jd, b;
-    for (int i = 0; i < 2; i++) {
-        id = i + 1;
-        jd = id * (id - 1) / 2;
-        b = (int64_t)pos[i] - (int64_t)lsc;
-        Sii += id * id;
-        Sij += id * jd;
-        Sjj += jd * jd;
-        Sib += id * b;
-        Sjb += jd * b;
-    }
+    // double Sii = 0;
+    // double Sij = 0;
+    // double Sjj = 0;
+    // double Sib = 0;
+    // double Sjb = 0;
+    // double id, jd, b;
+    // for (int i = 0; i < 2; i++) {
+    //     id = i + 1;
+    //     jd = id * (id - 1) / 2;
+    //     b = (int64_t)pos[i] - (int64_t)lsc;
+    //     Sii += id * id;
+    //     Sij += id * jd;
+    //     Sjj += jd * jd;
+    //     Sib += id * b;
+    //     Sjb += jd * b;
+    // }
 
-    for (int i = 2; i < max_count; i++) {
-        id = i + 1;
-        jd = id * (id - 1) / 2;
-        b = (int64_t)pos[i] - (int64_t)lsc;
+    // for (int i = 2; i < 32; i++) {
+    //     id = i + 1;
+    //     jd = id * (id - 1) / 2;
+    //     b = (int64_t)pos[i] - (int64_t)lsc;
 
-        Sii += id * id;
-        Sij += id * jd;
-        Sjj += jd * jd;
-        Sib += id * b;
-        Sjb += jd * b;
+    //     Sii += id * id;
+    //     Sij += id * jd;
+    //     Sjj += jd * jd;
+    //     Sib += id * b;
+    //     Sjb += jd * b;
 
-        double det = Sii * Sjj - Sij * Sij;
-        if (det == 0.0)
-            goto out;
+    //     double det = Sii * Sjj - Sij * Sij;
+    //     if (det == 0.0)
+    //         goto out;
 
-        double I = (Sjj * Sib - Sij * Sjb) / det;
-        double A = (-Sij * Sib + Sii * Sjb) / det;
+    //     double I = (Sjj * Sib - Sij * Sjb) / det;
+    //     double A = (-Sij * Sib + Sii * Sjb) / det;
 
-        if (I < .0 || I > 0x80000000)
-            goto out;
-        if (A <= minadd || A >= maxadd)
-            goto out;
-        add = llround(A);
+    //     if (I < .0 || I > 0x80000000)
+    //         goto out;
+    //     if (A <= minadd || A >= maxadd)
+    //         goto out;
+    //     add = llround(A);
 
-        // struct points point = minmax_point(sc, sc->queue_pos + i);
-        // int64_t addfactor = (int64_t)i * (i - 1) / 2;
-        // int64_t predicted = lsc + interval * i + d_add * addfactor;
-        // uint32_t actual = pos[i];
+    //     // struct points point = minmax_point(sc, sc->queue_pos + i);
+    //     // int64_t addfactor = (int64_t)i * (i - 1) / 2;
+    //     // int64_t predicted = lsc + interval * i + d_add * addfactor;
+    //     // uint32_t actual = pos[i];
 
-        // if (predicted <= p.minp || predicted >= p.maxp)
-        //     goto out;
+    //     // if (predicted <= p.minp || predicted >= p.maxp)
+    //     //     goto out;
 
-        uint32_t p = 0;
-        uint32_t t_interval = llround(I);
-        for (uint32_t c=0; c<i; c++) {
-            struct points point = minmax_point(sc, sc->queue_pos + c);
-            p += t_interval;
-            if (p < point.minp || p > point.maxp)
-                goto out;
-            if (t_interval >= 0x80000000)
-                goto out;
-            t_interval += add;
-        }
+    //     uint32_t p = 0;
+    //     uint32_t t_interval = llround(I);
+    //     for (uint32_t c=0; c<i; c++) {
+    //         struct points point = minmax_point(sc, sc->queue_pos + c);
+    //         p += t_interval;
+    //         if (p < point.minp || p > point.maxp)
+    //             goto out;
+    //         if (t_interval >= 0x80000000)
+    //             goto out;
+    //         t_interval += add;
+    //     }
 
-        // Valid fit so far
-        best_move.count = i;
-        best_move.interval = llround(I);
-        best_move.add = add;
-    }
+    //     // Valid fit so far
+    //     best_move.count = i;
+    //     best_move.interval = llround(I);
+    //     best_move.add = add;
+    // }
 
 out:
-    return best_move;
+    return move;
 }
 
 
@@ -385,58 +404,58 @@ add_move(struct stepcompress *sc, uint64_t first_clock, struct step_move *move)
 }
 
 
-static uint32_t
-get_interval_variation(struct stepcompress *sc, struct step_move move)
-{
-    uint32_t lsc = sc->last_step_clock;
-    uint32_t T1 = lsc + sc->queue_pos[move.count-2];
-    uint32_t T2 = lsc + sc->queue_pos[move.count-1];
-    uint32_t first_interval = T2 - T1;
-    uint32_t last_interval = move.interval + move.add * (move.count - 1);
-    // fprintf(stderr, "f: %d, l: %d\n", first_interval, last_interval);
-    if (last_interval > first_interval)
-        return last_interval - first_interval;
-    else
-        return first_interval - last_interval;
-}
+// static uint32_t
+// get_interval_variation(struct stepcompress *sc, struct step_move move)
+// {
+//     uint32_t lsc = sc->last_step_clock;
+//     uint32_t T1 = lsc + sc->queue_pos[move.count-2];
+//     uint32_t T2 = lsc + sc->queue_pos[move.count-1];
+//     uint32_t first_interval = T2 - T1;
+//     uint32_t last_interval = move.interval + move.add * (move.count - 1);
+//     // fprintf(stderr, "f: %d, l: %d\n", first_interval, last_interval);
+//     if (last_interval > first_interval)
+//         return last_interval - first_interval;
+//     else
+//         return first_interval - last_interval;
+// }
 
-// Post bisect correction hook
-static struct step_move
-refit_sawtooth(struct stepcompress *sc, struct step_move move)
-{
-    if (move.count <= 2)
-        return move;
+// // Post bisect correction hook
+// static struct step_move
+// refit_sawtooth(struct stepcompress *sc, struct step_move move)
+// {
+//     if (move.count <= 2)
+//         return move;
 
-    uint32_t last_variation = get_interval_variation(sc, move);
-    // fprintf(stderr, "variation: %d\n", last_variation);
+//     uint32_t last_variation = get_interval_variation(sc, move);
+//     // fprintf(stderr, "variation: %d\n", last_variation);
 
-    // If the interval variation within this move is already smooth, keep it
-    uint32_t max_variation = 4;
-    if (last_variation <= max_variation)
-        return move;
+//     // If the interval variation within this move is already smooth, keep it
+//     uint32_t max_variation = 4;
+//     if (last_variation <= max_variation)
+//         return move;
 
-    // Try reducing count until variation is acceptable
-    uint32_t best_variation = last_variation;
+//     // Try reducing count until variation is acceptable
+//     uint32_t best_variation = last_variation;
 
-    while (move.count > 2) {
-        move.count--;
-        uint32_t current_variation = get_interval_variation(sc, move);
+//     while (move.count > 2) {
+//         move.count--;
+//         uint32_t current_variation = get_interval_variation(sc, move);
 
-        if (current_variation < best_variation) {
-            // Improvement found
-            best_variation = current_variation;
-            // If we're now within smooth bounds, stop here
-            if (current_variation < max_variation)
-                break;
-        } else {
-            // No improvement, stop trying
-            move.count++;
-            break;
-        }
-    }
+//         if (current_variation < best_variation) {
+//             // Improvement found
+//             best_variation = current_variation;
+//             // If we're now within smooth bounds, stop here
+//             if (current_variation < max_variation)
+//                 break;
+//         } else {
+//             // No improvement, stop trying
+//             move.count++;
+//             break;
+//         }
+//     }
 
-    return move;
-}
+//     return move;
+// }
 
 
 // Convert previously scheduled steps into commands for the mcu
@@ -447,7 +466,7 @@ queue_flush(struct stepcompress *sc, uint64_t move_clock)
         return 0;
     while (sc->last_step_clock < move_clock) {
         struct step_move move = compress_bisect_add(sc);
-        move = refit_sawtooth(sc, move);
+        // move = refit_sawtooth(sc, move);
         int ret = check_line(sc, move);
         if (ret)
             return ret;
