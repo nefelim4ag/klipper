@@ -50,6 +50,8 @@ struct stepcompress {
     int r_error;
     uint32_t last_interval;
     int16_t last_add;
+    // Cache intervals
+    uint32_t Ic[65535];
 };
 
 struct step_move {
@@ -134,14 +136,15 @@ lls_solve(const struct lls_state *state) {
     // Sum of (k-kmean)*(y - ymean) == Σ(k-kmean)*y
     double Sxy = (double)state->S_ky - n * k_mean * ((double)state->S_y / n);
     if (Sxx == 0.0) {
-        ret.A_lo = 0.0;
+        ret.A_lo = 0;
+        ret.A_hi = 0;
     } else {
-        ret.A_lo = Sxy / Sxx - 0.5;
-        ret.A_hi = Sxy / Sxx + 0.5;
+        ret.A_lo = floor(Sxy / Sxx);
+        ret.A_hi = ceil(Sxy / Sxx);
     }
     double y_mean = (double)state->S_y / n;
-    ret.I_lo = y_mean - (ret.A_lo) * k_mean;
-    ret.I_hi = y_mean - (ret.A_hi) * k_mean;
+    ret.I_lo = floor(y_mean - (ret.A_lo) * k_mean);
+    ret.I_hi = ceil(y_mean - (ret.A_hi) * k_mean);
     return ret;
 }
 
@@ -178,8 +181,6 @@ compress_bisect_add(struct stepcompress *sc)
     if (qlast > sc->queue_pos + steps)
         qlast = sc->queue_pos + steps;
     steps = qlast - sc->queue_pos;
-    // Utilize stack, because I'm lazy and don't want to validate/invalidate cache
-    uint32_t Ic[steps];
 
     uint32_t *pos = sc->queue_pos;
     uint32_t lsc = sc->last_step_clock;
@@ -197,9 +198,9 @@ compress_bisect_add(struct stepcompress *sc)
 
     // Try perfect fit 2 points
     {
-        Ic[0] = move.interval;
-        Ic[1] = pos[1] - pos[0];
-        add = (int32_t)(Ic[1]) - (int32_t)(Ic[0]);
+        sc->Ic[0] = move.interval;
+        sc->Ic[1] = pos[1] - pos[0];
+        add = (int32_t)(sc->Ic[1]) - (int32_t)(sc->Ic[0]);
     }
 
     // knot
@@ -226,23 +227,22 @@ compress_bisect_add(struct stepcompress *sc)
     };
 
     uint32_t i = 0;
-    lls_add_point(&S, i, Ic[i]); i++;
-    lls_add_point(&S, i, Ic[i]); i++;
+    lls_add_point(&S, i, sc->Ic[i]); i++;
+    lls_add_point(&S, i, sc->Ic[i]); i++;
     // Used later
     int ret = 0;
     // Fast exponential pass
     // Initial value is some in vivo constant which make the overral fit for
     // discrete integer data better.
-    // Main reason to fit the round oscillating data where intervals are +-1
     // But suffecently small to not waste cycles on the not encodable sequences
     for (int k = 64; k < steps; k = k*2) {
         if (k > steps)
             k = steps;
         for (; i < k; i++) {
-            Ic[i] = pos[i] - pos[i-1];
-            lls_add_point(&S, i, Ic[i]);
+            sc->Ic[i] = pos[i] - pos[i-1];
+            lls_add_point(&S, i, sc->Ic[i]);
         }
-        Ic[i] = pos[i] - pos[i-1];
+        sc->Ic[i] = pos[i] - pos[i-1];
 
         struct ia_pair fit = lls_solve(&S);
         int I_fit = fit.I_lo;
@@ -266,9 +266,6 @@ compress_bisect_add(struct stepcompress *sc)
     // I always forget that calculations
     // addfactor = count * (count - 1) / 2;
     // predicted = lsc + interval * count + add * addfactor;
-    // So delta would be 1 * addfactor
-    // (count**2 - count) / 2
-
     uint32_t left = move.count;
     uint32_t right = steps;
     // Binary search pass
@@ -276,13 +273,15 @@ compress_bisect_add(struct stepcompress *sc)
         uint32_t mid = left + (right - left) / 2;
         // fprintf(stderr, "call_id:\t%i| left: %d, right: %d\n", call_id, left, right);
         for (; i < mid; i++) {
-            lls_add_point(&S, i, Ic[i]);
+            lls_add_point(&S, i, sc->Ic[i]);
         }
         for (; i > mid; i--) {
-            lls_remove_point(&S, i, Ic[i]);
+            lls_remove_point(&S, i, sc->Ic[i-1]);
         }
 
         struct ia_pair fit = lls_solve(&S);
+        // int I_fit = 0;
+        // int A_fit = 0;
         int I_fit = fit.I_lo;
         int A_fit = fit.A_lo;
         ret = validate_move(sc, fit.I_lo, fit.A_lo, S.n);
@@ -303,18 +302,6 @@ compress_bisect_add(struct stepcompress *sc)
         move.add = A_fit;
         move.interval = I_fit;
         move.count = S.n;
-    }
-
-    // Duct tape for oscillation input
-    if (move.add == 0 && move.count > sc->max_error/4 &&  move.count < sc->max_error) {
-        uint32_t I_avg = 0;
-        for (i = 0; i < move.count; i++)
-            I_avg += Ic[i];
-        I_avg = I_avg / move.count;
-        if (I_avg < move.interval+2 && move.interval - 2 < I_avg)
-            move.count = move.count - move.count / 4;
-        // if (move.interval == 2343)
-        //     fprintf(stderr, "call_id:\t%i| m.c: %d, m:i: %d, avg: %d, m:a %i, max err: %d\n", call_id, move.count, move.interval, I_avg, move.add, sc->max_error);
     }
 
 out:
