@@ -73,10 +73,10 @@ struct points {
 };
 
 struct lls_state {
-    double S_k;    // sum k
-    double S_k2;   // sum k^2
-    double S_y;    // sum y_k
-    double S_ky;   // sum k * y_k
+    int64_t S_k;    // sum k
+    int64_t S_k2;   // sum k^2
+    int64_t S_y;    // sum y_k
+    int64_t S_ky;   // sum k * y_k
     uint32_t n;
 };
 
@@ -96,8 +96,8 @@ minmax_point(struct stepcompress *sc, uint32_t *pos)
 // Add a point to LLS calculation
 static void
 lls_add_point(struct lls_state *state, uint32_t k, uint32_t interval) {
-    double kd = (double)k;
-    double yd = (double)interval;
+    int64_t kd = k;
+    int64_t yd = interval;
     state->S_k += kd;
     state->S_k2 += kd*kd;
     state->S_y += yd;
@@ -108,8 +108,8 @@ lls_add_point(struct lls_state *state, uint32_t k, uint32_t interval) {
 // Remove a point from LLS calculation
 static void
 lls_remove_point(struct lls_state *state, uint32_t k, uint32_t interval) {
-    double kd = (double)k;
-    double yd = (double)interval;
+    uint32_t kd = k;
+    uint32_t yd = interval;
     state->S_k -= kd;
     state->S_k2 -= kd*kd;
     state->S_y -= yd;
@@ -118,29 +118,28 @@ lls_remove_point(struct lls_state *state, uint32_t k, uint32_t interval) {
 }
 
 struct ia_pair {
-    double I;
-    double A;
+    uint32_t I;
+    int32_t A;
 };
 
-// Solve for A,I using normal equations but in stable centered form
 static inline struct ia_pair
 lls_solve(const struct lls_state *state) {
     struct ia_pair ret = {
-        .I = .0,
-        .A = .0,
+        .I = 0,
+        .A = 0,
     };
-    double n = state->n;
-    double k_mean = state->S_k / n;
+    int64_t n = state->n;
+    int64_t k_mean = state->S_k / n;
     // Σ (k-kmean)^2
-    double Sxx = state->S_k2 - n * k_mean * k_mean;
+    int64_t Sxx = state->S_k2 - n * k_mean * k_mean;
     // Σ (k-kmean)*(y - ymean) == Σ(k-kmean)*y
-    double Sxy = state->S_ky - n * k_mean * (state->S_y / n);
+    int64_t Sxy = state->S_ky - n * k_mean * (state->S_y / n);
     if (Sxx == 0.0) {
         ret.A = 0.0;
     } else {
         ret.A = Sxy / Sxx;
     }
-    double y_mean = state->S_y / n;
+    int64_t y_mean = state->S_y / n;
     ret.I = y_mean - (ret.A) * k_mean;
     return ret;
 }
