@@ -178,6 +178,8 @@ compress_bisect_add(struct stepcompress *sc)
     if (qlast > sc->queue_pos + steps)
         qlast = sc->queue_pos + steps;
     steps = qlast - sc->queue_pos;
+    // Utilize stack, because I'm lazy and don't want to validate/invalidate cache
+    uint32_t Ic[steps];
 
     uint32_t *pos = sc->queue_pos;
     uint32_t lsc = sc->last_step_clock;
@@ -195,9 +197,9 @@ compress_bisect_add(struct stepcompress *sc)
 
     // Try perfect fit 2 points
     {
-        int32_t I0 = move.interval;
-        int32_t I1 = pos[1] - pos[0];
-        add = I1 - I0;
+        Ic[0] = move.interval;
+        Ic[1] = pos[1] - pos[0];
+        add = (int32_t)(Ic[1]) - (int32_t)(Ic[0]);
     }
 
     // knot
@@ -224,8 +226,8 @@ compress_bisect_add(struct stepcompress *sc)
     };
 
     uint32_t i = 0;
-    lls_add_point(&S, i, move.interval);
-    i++;
+    lls_add_point(&S, i, Ic[i]); i++;
+    lls_add_point(&S, i, Ic[i]); i++;
     // Used later
     int ret = 0;
     // Fast exponential pass
@@ -237,8 +239,10 @@ compress_bisect_add(struct stepcompress *sc)
         if (k > steps)
             k = steps;
         for (; i < k; i++) {
-            lls_add_point(&S, i, pos[i] - pos[i-1]);
+            Ic[i] = pos[i] - pos[i-1];
+            lls_add_point(&S, i, Ic[i]);
         }
+        Ic[i] = pos[i] - pos[i-1];
 
         struct ia_pair fit = lls_solve(&S);
         int I_fit = fit.I_lo;
@@ -267,16 +271,15 @@ compress_bisect_add(struct stepcompress *sc)
 
     uint32_t left = move.count;
     uint32_t right = steps;
-    uint32_t mid = 0;
     // Binary search pass
     while (left < right) {
-        mid = left + (right - left) / 2;
+        uint32_t mid = left + (right - left) / 2;
         // fprintf(stderr, "call_id:\t%i| left: %d, right: %d\n", call_id, left, right);
         for (; i < mid; i++) {
-            lls_add_point(&S, i, pos[i] - pos[i-1]);
+            lls_add_point(&S, i, Ic[i]);
         }
         for (; i > mid; i--) {
-            lls_remove_point(&S, i, pos[i] - pos[i-1]);
+            lls_remove_point(&S, i, Ic[i]);
         }
 
         struct ia_pair fit = lls_solve(&S);
