@@ -73,9 +73,11 @@ struct points {
 };
 
 struct lls_state {
-    double Snn, Snq, Sqq;  // Sum matrices
-    double Snt, Sqt;       // Cross terms
-    uint32_t n_points;     // Current number of points
+    double S_k;    // sum k
+    double S_k2;   // sum k^2
+    double S_y;    // sum y_k
+    double S_ky;   // sum k * y_k
+    uint32_t n;
 };
 
 // Given a requested step time, return the minimum and maximum
@@ -92,38 +94,82 @@ minmax_point(struct stepcompress *sc, uint32_t *pos)
 }
 
 // Add a point to LLS calculation
-static void lls_add_point(struct lls_state *state, uint32_t point_index,
-                         uint32_t time_from_ref) {
-    double n = point_index + 1;
-    double q = n * (n - 1) / 2;
-    double t = time_from_ref;
-
-    state->Snn += n * n;
-    state->Snq += n * q;
-    state->Sqq += q * q;
-    state->Snt += n * t;
-    state->Sqt += q * t;
-    state->n_points++;
+static void
+lls_add_point(struct lls_state *state, uint32_t k, uint32_t interval) {
+    double kd = (double)k;
+    double yd = (double)interval;
+    state->S_k += kd;
+    state->S_k2 += kd*kd;
+    state->S_y += yd;
+    state->S_ky += kd * yd;
+    state->n++;
 }
 
 // Remove a point from LLS calculation
-static void lls_remove_point(struct lls_state *state, uint32_t point_index,
-                            uint32_t time_from_ref) {
-    double n = point_index + 1;
-    double q = n * (n - 1) / 2;
-    double t = time_from_ref;
+static void
+lls_remove_point(struct lls_state *state, uint32_t k, uint32_t interval) {
+    double kd = (double)k;
+    double yd = (double)interval;
+    state->S_k -= kd;
+    state->S_k2 -= kd*kd;
+    state->S_y -= yd;
+    state->S_ky -= kd * yd;
+    state->n--;
+}
 
-    state->Snn -= n * n;
-    state->Snq -= n * q;
-    state->Sqq -= q * q;
-    state->Snt -= n * t;
-    state->Sqt -= q * t;
-    state->n_points--;
+struct ia_pair {
+    double I;
+    double A;
+};
+
+// Solve for A,I using normal equations but in stable centered form
+static inline struct ia_pair
+lls_solve(const struct lls_state *state) {
+    struct ia_pair ret = {
+        .I = .0,
+        .A = .0,
+    };
+    double n = state->n;
+    double k_mean = state->S_k / n;
+    // Σ (k-kmean)^2
+    double Sxx = state->S_k2 - n * k_mean * k_mean;
+    // Σ (k-kmean)*(y - ymean) == Σ(k-kmean)*y
+    double Sxy = state->S_ky - n * k_mean * (state->S_y / n);
+    if (Sxx == 0.0) {
+        ret.A = 0.0;
+    } else {
+        ret.A = Sxy / Sxx;
+    }
+    double y_mean = state->S_y / n;
+    ret.I = y_mean - (ret.A) * k_mean;
+    return ret;
+}
+
+static int call_id = 0;
+// Returns 0 on success if hit min interval -c, if max +c
+static int
+validate_move(struct stepcompress *sc, uint32_t I, int16_t A, uint16_t steps)
+{
+    uint32_t p = 0;
+    int c = 0;
+    for (; c < steps; c++) {
+        struct points point = minmax_point(sc, sc->queue_pos + c);
+        p += I;
+        if (p < point.minp) {
+            // fprintf(stderr, "call_id:\t%i| bounds: %d < %d \n", call_id, p, point.minp);
+            return -1;
+        }
+        if (p > point.maxp) {
+            // fprintf(stderr, "call_id:\t%i| bounds: %d > %d\n", call_id, p, point.maxp);
+            return +1;
+        }
+        I += A;
+    }
+    return 0;
 }
 
 // Find a 'step_move' that covers a series of step times
 // Fit quadric function
-static int call_id = 0;
 static struct step_move
 compress_bisect_add(struct stepcompress *sc)
 {
@@ -162,7 +208,6 @@ compress_bisect_add(struct stepcompress *sc)
         goto out;
     }
 
-
     move.count = 2;
     move.add = add;
     if (steps == 2) {
@@ -193,64 +238,52 @@ compress_bisect_add(struct stepcompress *sc)
     }
 
     // Linear Least Squares
-    // Exponential search
-    // Sum of i*i & etc
     // Math magic, I would say
     struct lls_state S = {
-      .Snn = .0,
-      .Snq = .0,
-      .Sqq = .0,
-      .Snt = .0,
-      .Sqt = .0,
-      .n_points = 0,
+      .S_k = .0,
+      .S_k2 = .0,
+      .S_y = .0,
+      .S_ky = .0,
+      .n = 0,
     };
 
-    uint32_t slack = sc->max_error;
-    uint32_t I_lo = move.interval > slack ? move.interval - slack : 1;
-    uint32_t I_hi = move.interval + slack;
     uint32_t i = 0;
+    lls_add_point(&S, i, pos[0] - lsc);
+    i++;
+    // Used later
+    int ret = 0;
     // Fast exponential pass
-    for (int k = 4; k < steps; k = k *2) {
+    // Initial value is some in vivo constant which make the overral fit for
+    // discrete integer data better.
+    for (int k = 128; k < steps; k = k *2) {
         if (k > steps)
             k = steps;
         for (; i < k; i++) {
-            lls_add_point(&S, i, pos[i] - lsc);
+            lls_add_point(&S, i, pos[i] - pos[i-1]);
         }
 
-        double det = S.Snn * S.Sqq - S.Snq * S.Snq;
-        if (det <= .0) {
-            fprintf(stderr, "call_id:\t%i| singular =( \n)", call_id);
+        struct ia_pair pair = lls_solve(&S);
+        uint32_t I_fit = pair.I;
+        int32_t A_fit = pair.A;
+        if (I_fit == 0)
             break;
-        }
-
-        // Cramer's rule
-        double numI = S.Sqq * S.Snt - S.Snq * S.Sqt;
-        double numA = S.Snn * S.Sqt - S.Snq * S.Snt;
-        int32_t I_fit = numI / det;
-        int32_t A_fit = numA / det;
-
-        uint32_t p = 0;
-        uint32_t t_interval = I_fit;
-        uint32_t c = 0;
-        for (; c < S.n_points; c++) {
-            struct points point = minmax_point(sc, sc->queue_pos + c);
-            p += t_interval;
-            if (p < point.minp) {
-                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d \n", call_id, p, point.minp);
-                break;
-            }
-            if (p > point.maxp) {
-                // fprintf(stderr, "call_id:\t%i| bounds: %d > %d\n", call_id, p, point.maxp);
-                break;
-            }
-            t_interval += A_fit;
-        }
-        if (c < S.n_points)
+        ret = validate_move(sc, I_fit, A_fit, S.n);
+        if (ret != 0) {
             break;
+        } else {
+            move.add = A_fit;
+            move.interval = I_fit;
+            move.count = i;
+        }
     }
 
     steps = i;
 
+    // I always forget that calculations
+    // addfactor = count * (count - 1) / 2;
+    // predicted = lsc + interval * count + add * addfactor;
+    // So delta would be 1 * addfactor
+    // (count**2 - count) / 2
 
     uint32_t left = 2;
     uint32_t right = steps;
@@ -260,43 +293,22 @@ compress_bisect_add(struct stepcompress *sc)
         mid = left + (right - left) / 2;
         // fprintf(stderr, "call_id:\t%i| left: %d, right: %d\n", call_id, left, right);
         for (; i < mid; i++) {
-            lls_add_point(&S, i, pos[i] - lsc);
+            lls_add_point(&S, i, pos[i] - pos[i-1]);
         }
         for (; i > mid; i--) {
-            lls_remove_point(&S, i, pos[i] - lsc);
+            lls_remove_point(&S, i, pos[i] - pos[i-1]);
         }
 
-        double det = S.Snn * S.Sqq - S.Snq * S.Snq;
-        if (det == 0) {
-            // singular
-            // fprintf(stderr, "call_id:\t%i| singular =( \n)", call_id);
+        struct ia_pair pair = lls_solve(&S);
+        uint32_t I_fit = pair.I;
+        int32_t A_fit = pair.A;
+        if (I_fit == 0){
             right = mid - 1;
             continue;
         }
 
-        // Cramer's rule
-        double numI = S.Sqq * S.Snt - S.Snq * S.Sqt;
-        double numA = S.Snn * S.Sqt - S.Snq * S.Snt;
-        int32_t I_fit = numI / det;
-        int32_t A_fit = numA / det;
-
-        uint32_t p = 0;
-        uint32_t t_interval = I_fit;
-        uint32_t c = 0;
-        for (; c < S.n_points; c++) {
-            struct points point = minmax_point(sc, sc->queue_pos + c);
-            p += t_interval;
-            if (p < point.minp) {
-                // fprintf(stderr, "call_id:\t%i| bounds: %d < %d \n", call_id, p, point.minp);
-                break;
-            }
-            if (p > point.maxp) {
-                // fprintf(stderr, "call_id:\t%i| bounds: %d > %d\n", call_id, p, point.maxp);
-                break;
-            }
-            t_interval += A_fit;
-        }
-        if (c < S.n_points) {
+        ret = validate_move(sc, I_fit, A_fit, S.n);
+        if (ret != 0) {
             right = mid - 1;
             continue;
         }
@@ -306,8 +318,9 @@ compress_bisect_add(struct stepcompress *sc)
         // fprintf(stderr, "call_id:\t%i| k: %i, I_fit: %i, A_fit: %i\n", call_id, S.n_points, I_fit, A_fit);
         move.add = A_fit;
         move.interval = I_fit;
-        move.count = S.n_points;
+        move.count = S.n;
     }
+
 out:
     sc->knot -= move.count;
     // fprintf(stderr, "call_id:\t%i| m.c: %d, m:i: %d, m:a %i\n", call_id, move.count, move.interval, move.add);
@@ -499,7 +512,6 @@ queue_flush(struct stepcompress *sc, uint64_t move_clock)
         return 0;
     while (sc->last_step_clock < move_clock) {
         struct step_move move = compress_bisect_add(sc);
-        // move = refit_sawtooth(sc, move);
         int ret = check_line(sc, move);
         if (ret)
             return ret;
