@@ -305,6 +305,18 @@ compress_bisect_add(struct stepcompress *sc)
         move.count = S.n;
     }
 
+    // Duct tape for oscillation input
+    if (move.add == 0 && move.count > sc->max_error/4 &&  move.count < sc->max_error) {
+        uint32_t I_avg = 0;
+        for (i = 0; i < move.count; i++)
+            I_avg += Ic[i];
+        I_avg = I_avg / move.count;
+        if (I_avg < move.interval+2 && move.interval - 2 < I_avg)
+            move.count = move.count - move.count / 4;
+        // if (move.interval == 2343)
+        //     fprintf(stderr, "call_id:\t%i| m.c: %d, m:i: %d, avg: %d, m:a %i, max err: %d\n", call_id, move.count, move.interval, I_avg, move.add, sc->max_error);
+    }
+
 out:
     // fprintf(stderr, "call_id:\t%i| m.c: %d, m:i: %d, m:a %i\n", call_id, move.count, move.interval, move.add);
     sc->last_interval = move.interval;
