@@ -47,12 +47,9 @@ struct stepcompress {
     int64_t last_position;
     struct list_head history_list;
     // Compression state
-    int r_error;
     uint32_t last_interval;
     int16_t last_add;
     uint16_t last_count;
-    // Cache intervals
-    uint32_t Ic[65535];
 };
 
 struct step_move {
@@ -150,34 +147,29 @@ lls_solve(const struct lls_state *state) {
 }
 
 static int call_id = 0;
-// static double
-// compute_score(uint32_t *Ic, uint32_t n, int32_t I, int32_t A, int use_mae)
-// {
-//     double sse = 0.0;
-//     double mae = 0.0;
-//     uint32_t p = 0;
-//     for (uint32_t k = 0; k < n; ++k) {
-//         p += I;
-//         I += A;
-//         double err = (double)Ic[k] - (double)p;
-//         sse += err * err;
-//         mae += fabs(err);
-//     }
-//     if (use_mae)
-//         return (mae / (double)n);
-//     else
-//         return (sse / (double)n);
-// }
-
 // Returns 0 on success if hit min interval -1, if max +1
 static int
-validate_move(struct stepcompress *sc, uint32_t I, int16_t A, uint16_t steps)
+validate_move(struct stepcompress *sc, uint32_t I, int16_t A, uint16_t C)
 {
+    // Predict
     uint32_t p = 0;
     if (I == 0)
         return -1;
-    for (int c = 0; c < steps; c++) {
-        struct points point = minmax_point(sc, sc->queue_pos + c);
+    // Cast the line and fast check the end
+    p = I * C + A * C * (C - 1) / 2;
+    struct points point = minmax_point(sc, sc->queue_pos + (C-1));
+    if (p < point.minp) {
+        // fprintf(stderr, "call_id:\t%i| C: %d bounds: %d < %d \n", call_id, C, p, point.minp);
+        return -1;
+    }
+    if (p > point.maxp) {
+        // fprintf(stderr, "call_id:\t%i| C: %d bounds: %d > %d\n", call_id, C, p, point.maxp);
+        return +1;
+    }
+    p = 0;
+
+    for (int i = 0; i < C; i++) {
+        point = minmax_point(sc, sc->queue_pos + i);
         p += I;
         if (p < point.minp) {
             // fprintf(stderr, "call_id:\t%i| bounds: %d < %d \n", call_id, p, point.minp);
@@ -200,12 +192,13 @@ static struct step_move
 compress_bisect_add(struct stepcompress *sc)
 {
     call_id++;
-    uint32_t steps = 8192;
+    uint32_t steps = 0xffff;
     uint32_t *qlast = sc->queue_next;
     if (qlast > sc->queue_pos + steps)
         qlast = sc->queue_pos + steps;
     steps = qlast - sc->queue_pos;
-
+    // Cache intervals
+    uint32_t cI[steps];
     const uint32_t *pos = sc->queue_pos;
     const uint32_t lsc = sc->last_step_clock;
     struct step_move move = {
@@ -213,6 +206,7 @@ compress_bisect_add(struct stepcompress *sc)
         .count = 1,
         .add = 0,
     };
+    cI[0] = move.interval;
     // bias towards last interval
     {
         struct points point = minmax_point(sc, pos);
@@ -222,7 +216,7 @@ compress_bisect_add(struct stepcompress *sc)
         // fprintf(stderr, "call_id:\t%i| i: %d/%d,  p: %d < %d < %d, a: %d\n", call_id, i, steps, point.minp, p, point.maxp, pos[i] - lsc);
         if (p >= point.minp && p <= point.maxp) {
             move.interval = p;
-            sc->Ic[0] = p;
+            cI[0] = p;
         }
     }
 
@@ -232,9 +226,8 @@ compress_bisect_add(struct stepcompress *sc)
     // Try perfect fit 2 points
     {
         int32_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
-        sc->Ic[0] = move.interval;
-        sc->Ic[1] = pos[1] - pos[0];
-        add = (int64_t)(sc->Ic[1]) - (int64_t)(sc->Ic[0]);
+        cI[1] = pos[1] - pos[0];
+        add = (int32_t)(cI[1]) - (int32_t)(cI[0]);
         // knot
         if (add < minadd || add > maxadd) {
             // fprintf(stderr, "call_id:\t%i| knot, add: %i\n", call_id, add);
@@ -272,7 +265,7 @@ compress_bisect_add(struct stepcompress *sc)
             move.count = best_count;
             move.add = 0;
             // Forward bias
-            sc->Ic[0] = best_interval;
+            cI[0] = best_interval;
         }
     }
 
@@ -288,18 +281,16 @@ compress_bisect_add(struct stepcompress *sc)
 
     uint32_t i = 0;
     // Preseed
-    lls_add_point(&S, i, sc->Ic[i]); i++;
-    lls_add_point(&S, i, sc->Ic[i]); i++;
+    lls_add_point(&S, i, cI[i]); i++;
+    lls_add_point(&S, i, cI[i]); i++;
     // Fast exponential search
-    int k = 4;
-    if (steps > 128)
-        k = 16;
+    int k = 64;
+    uint32_t last_valid = move.count;
     for (; k < steps; k = k*2) {
         for (; i < k; i++) {
-            sc->Ic[i] = pos[i] - pos[i-1];
-            lls_add_point(&S, i, sc->Ic[i]);
+            cI[i] = pos[i] - pos[i-1];
+            lls_add_point(&S, i, cI[i]);
         }
-        sc->Ic[i] = pos[i] - pos[i-1];
 
         struct ia_pair fit = lls_solve(&S);
         uint32_t I_fit = fit.I_lo;
@@ -318,21 +309,23 @@ compress_bisect_add(struct stepcompress *sc)
             move.interval = I_fit;
             move.add = A_fit;
         }
+        last_valid = S.n;
     }
 
     // I always forget that calculations
     // addfactor = count * (count - 1) / 2;
     // predicted = lsc + interval * count + add * addfactor;
-    uint32_t left = move.count;
+    uint32_t left = last_valid;
+    // Exponential search fail around there
     uint32_t right = i;
     // Binary search pass
-    while (left < right) {
+    while (left <= right) {
         uint32_t mid = left + (right - left) / 2;
         for (; i < mid; i++) {
-            lls_add_point(&S, i, sc->Ic[i]);
+            lls_add_point(&S, i, cI[i]);
         }
         for (; i > mid; i--) {
-            lls_remove_point(&S, i-1, sc->Ic[i-1]);
+            lls_remove_point(&S, i-1, cI[i-1]);
         }
 
         struct ia_pair fit = lls_solve(&S);
@@ -357,13 +350,9 @@ compress_bisect_add(struct stepcompress *sc)
             move.add = A_fit;
             move.interval = I_fit;
         }
-        // if (S.n == 2 && abs(move.add) < 3)
-            // fprintf(stderr, "call_id:\t%i| k: %i, I_fit: %i, A_fit: %i\n", call_id, S.n, I_fit, A_fit);
     }
 
 out:
-    // if (move.count == 2 && abs(move.add) < 3)
-    //     fprintf(stderr, "call_id:\t%i| m.c: %d/%d, m:i: %d, m:a %i\n", call_id, move.count, steps, move.interval, move.add);
     sc->last_interval = move.interval;
     sc->last_add = move.add;
     sc->last_count = move.count;
@@ -434,7 +423,6 @@ stepcompress_fill(struct stepcompress *sc, uint32_t max_error
                   , int32_t queue_step_msgtag, int32_t set_next_step_dir_msgtag)
 {
     sc->max_error = max_error;
-    sc->r_error = sqrt(max_error);
     sc->queue_step_msgtag = queue_step_msgtag;
     sc->set_next_step_dir_msgtag = set_next_step_dir_msgtag;
 }
