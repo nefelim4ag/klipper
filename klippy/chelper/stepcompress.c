@@ -75,10 +75,11 @@ struct points {
 };
 
 struct lls_state {
-    int64_t S_k;    // sum k
-    int64_t S_k2;   // sum k^2
-    int64_t S_y;    // sum y_k
-    int64_t S_ky;   // sum k * y_k
+    double S_k;  // sum k
+    double S_k2; // sum k^2
+    double S_y;  // sum y_k
+    double S_ky; // sum k * y_k
+    double S_w;  // sum weights
     uint32_t n;
 };
 
@@ -97,25 +98,27 @@ minmax_point(struct stepcompress *sc, const uint32_t *pos)
 
 // Add a point to LLS calculation
 static void
-lls_add_point(struct lls_state *state, uint32_t k, uint32_t interval) {
+lls_add_point(struct lls_state *state, uint32_t k, uint32_t interval, double w) {
     int64_t kd = k;
     int64_t yd = interval;
-    state->S_k += kd;
-    state->S_k2 += kd*kd;
-    state->S_y += yd;
-    state->S_ky += kd * yd;
+    state->S_w  += w;
+    state->S_k  += w * kd;
+    state->S_k2 += w * kd*kd;
+    state->S_y  += w * yd;
+    state->S_ky += w * kd * yd;
     state->n++;
 }
 
 // Remove a point from LLS calculation
 static void
-lls_remove_point(struct lls_state *state, uint32_t k, uint32_t interval) {
+lls_remove_point(struct lls_state *state, uint32_t k, uint32_t interval, double w) {
     uint32_t kd = k;
     uint32_t yd = interval;
-    state->S_k -= kd;
-    state->S_k2 -= kd*kd;
-    state->S_y -= yd;
-    state->S_ky -= kd * yd;
+    state->S_w  -= w;
+    state->S_k  -= w * kd;
+    state->S_k2 -= w * kd*kd;
+    state->S_y  -= w * yd;
+    state->S_ky -= w * kd * yd;
     state->n--;
 }
 
@@ -127,12 +130,14 @@ struct ia_pair {
 static inline struct ia_pair
 lls_solve(const struct lls_state *state) {
     struct ia_pair ret;
+    double Sw = state->S_w;
     double n = state->n;
-    double k_mean = (double)(state->S_k) / n;
+    double k_mean = (double)(state->S_k) / Sw;
+    double y_mean = (double)state->S_y / Sw;
     // Sum of (k-kmean)^2
-    double Sxx = state->S_k2 - n * k_mean * k_mean;
+    double Sxx = state->S_k2 - Sw * k_mean * k_mean;
     // Sum of (k-kmean)*(y - ymean) == Σ(k-kmean)*y
-    double Sxy = (double)state->S_ky - n * k_mean * ((double)state->S_y / n);
+    double Sxy = (double)state->S_ky - Sw * k_mean * y_mean;
     if (Sxx == 0.0) {
         ret.A_lo = 0;
         ret.A_hi = 0;
@@ -140,7 +145,6 @@ lls_solve(const struct lls_state *state) {
         ret.A_lo = floor(Sxy / Sxx);
         ret.A_hi = ceil(Sxy / Sxx);
     }
-    double y_mean = (double)state->S_y / n;
     ret.I_lo = floor(y_mean - (ret.A_lo) * k_mean);
     ret.I_hi = ceil(y_mean - (ret.A_hi) * k_mean);
     return ret;
@@ -199,6 +203,7 @@ compress_bisect_add(struct stepcompress *sc)
     steps = qlast - sc->queue_pos;
     // Cache intervals
     uint32_t cI[steps];
+    double cW[steps];
     const uint32_t *pos = sc->queue_pos;
     const uint32_t lsc = sc->last_step_clock;
     struct step_move move = {
@@ -281,15 +286,27 @@ compress_bisect_add(struct stepcompress *sc)
 
     uint32_t i = 0;
     // Preseed
-    lls_add_point(&S, i, cI[i]); i++;
-    lls_add_point(&S, i, cI[i]); i++;
+    {
+        struct points p = minmax_point(sc, pos + i);
+        double width = p.maxp - p.minp;
+        cW[i] = 12.0 / (width*width);
+        // w = 1 / width;
+        lls_add_point(&S, i, cI[i], cW[i]); i++;
+        p = minmax_point(sc, pos + i);
+        width = p.maxp - p.minp;
+        cW[i] = 12.0 / (width*width);
+        lls_add_point(&S, i, cI[i], cW[i]); i++;
+    }
     // Fast exponential search
-    int k = 64;
+    int k = 96;
     uint32_t last_valid = move.count;
     for (; k < steps; k = k*2) {
         for (; i < k; i++) {
             cI[i] = pos[i] - pos[i-1];
-            lls_add_point(&S, i, cI[i]);
+            struct points p = minmax_point(sc, pos + i);
+            double width = p.maxp - p.minp;
+            cW[i] = 12.0 / (width*width);
+            lls_add_point(&S, i, cI[i], cW[i]);
         }
 
         struct ia_pair fit = lls_solve(&S);
@@ -322,10 +339,10 @@ compress_bisect_add(struct stepcompress *sc)
     while (left <= right) {
         uint32_t mid = left + (right - left) / 2;
         for (; i < mid; i++) {
-            lls_add_point(&S, i, cI[i]);
+            lls_add_point(&S, i, cI[i], cW[i]);
         }
         for (; i > mid; i--) {
-            lls_remove_point(&S, i-1, cI[i-1]);
+            lls_remove_point(&S, i-1, cI[i-1], cW[i-1]);
         }
 
         struct ia_pair fit = lls_solve(&S);
