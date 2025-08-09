@@ -50,6 +50,7 @@ struct stepcompress {
     int r_error;
     uint32_t last_interval;
     int16_t last_add;
+    uint16_t last_count;
     // Cache intervals
     uint32_t Ic[65535];
 };
@@ -87,7 +88,7 @@ struct lls_state {
 // Given a requested step time, return the minimum and maximum
 // acceptable times
 static inline struct points
-minmax_point(struct stepcompress *sc, uint32_t *pos)
+minmax_point(struct stepcompress *sc, const uint32_t *pos)
 {
     uint32_t lsc = sc->last_step_clock, point = *pos - lsc;
     uint32_t prevpoint = pos > sc->queue_pos ? *(pos-1) - lsc : 0;
@@ -149,24 +150,46 @@ lls_solve(const struct lls_state *state) {
 }
 
 static int call_id = 0;
-// Returns 0 on success if hit min interval -c, if max +c
+// static double
+// compute_score(uint32_t *Ic, uint32_t n, int32_t I, int32_t A, int use_mae)
+// {
+//     double sse = 0.0;
+//     double mae = 0.0;
+//     uint32_t p = 0;
+//     for (uint32_t k = 0; k < n; ++k) {
+//         p += I;
+//         I += A;
+//         double err = (double)Ic[k] - (double)p;
+//         sse += err * err;
+//         mae += fabs(err);
+//     }
+//     if (use_mae)
+//         return (mae / (double)n);
+//     else
+//         return (sse / (double)n);
+// }
+
+// Returns 0 on success if hit min interval -1, if max +1
 static int
 validate_move(struct stepcompress *sc, uint32_t I, int16_t A, uint16_t steps)
 {
     uint32_t p = 0;
-    int c = 0;
-    for (; c < steps; c++) {
+    if (I == 0)
+        return -1;
+    for (int c = 0; c < steps; c++) {
         struct points point = minmax_point(sc, sc->queue_pos + c);
         p += I;
         if (p < point.minp) {
             // fprintf(stderr, "call_id:\t%i| bounds: %d < %d \n", call_id, p, point.minp);
-            return -(c+1);
+            return -1;
         }
         if (p > point.maxp) {
             // fprintf(stderr, "call_id:\t%i| bounds: %d > %d\n", call_id, p, point.maxp);
-            return +(c+1);
+            return +1;
         }
         I += A;
+        if (I > 0x80000000)
+            return -1;
     }
     return 0;
 }
@@ -176,68 +199,102 @@ validate_move(struct stepcompress *sc, uint32_t I, int16_t A, uint16_t steps)
 static struct step_move
 compress_bisect_add(struct stepcompress *sc)
 {
-    uint32_t steps = 0xffff;
+    call_id++;
+    uint32_t steps = 8192;
     uint32_t *qlast = sc->queue_next;
     if (qlast > sc->queue_pos + steps)
         qlast = sc->queue_pos + steps;
     steps = qlast - sc->queue_pos;
 
-    uint32_t *pos = sc->queue_pos;
-    uint32_t lsc = sc->last_step_clock;
-    int32_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
-
+    const uint32_t *pos = sc->queue_pos;
+    const uint32_t lsc = sc->last_step_clock;
     struct step_move move = {
         .interval = pos[0] - lsc,
         .count = 1,
         .add = 0,
     };
-    call_id++;
+    // bias towards last interval
+    {
+        struct points point = minmax_point(sc, pos);
+        uint64_t sum = sc->last_interval;
+        sum += move.interval;
+        uint32_t p = sum/2;
+        // fprintf(stderr, "call_id:\t%i| i: %d/%d,  p: %d < %d < %d, a: %d\n", call_id, i, steps, point.minp, p, point.maxp, pos[i] - lsc);
+        if (p >= point.minp && p <= point.maxp) {
+            move.interval = p;
+            sc->Ic[0] = p;
+        }
+    }
 
     if (steps == 1)
         goto out;
 
     // Try perfect fit 2 points
     {
+        int32_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
         sc->Ic[0] = move.interval;
         sc->Ic[1] = pos[1] - pos[0];
-        add = (int32_t)(sc->Ic[1]) - (int32_t)(sc->Ic[0]);
+        add = (int64_t)(sc->Ic[1]) - (int64_t)(sc->Ic[0]);
+        // knot
+        if (add < minadd || add > maxadd) {
+            // fprintf(stderr, "call_id:\t%i| knot, add: %i\n", call_id, add);
+            goto out;
+        }
+        move.count = 2;
+        move.add = add;
     }
 
-    // knot
-    if (add <= minadd || add >= maxadd) {
-        // fprintf(stderr, "call_id:\t%i| knot, add: %i\n", call_id, add);
-        goto out;
-    }
-
-    move.count = 2;
-    move.add = add;
-    if (steps == 2) {
-        // fprintf(stderr, "call_id:\t%i| only 2 steps avaliable\n", call_id);
-        goto out;
+    // Fast, greedy linear expansion
+    if (0){
+        uint32_t p = 0;
+        int best_count = 2;
+        uint32_t best_interval = move.interval;
+        int offsets[2] = {
+            -2, 2,
+        };
+        for (int k = 0; k < sizeof(offsets); k++) {
+            int i = 0;
+            for (; i < steps; i++) {
+                struct points point = minmax_point(sc, pos + i);
+                p += best_interval + offsets[k];
+                // fprintf(stderr, "call_id:\t%i| i: %d/%d,  p: %d < %d < %d, a: %d\n", call_id, i, steps, point.minp, p, point.maxp, pos[i] - lsc);
+                if (p < point.minp || p > point.maxp)
+                    break;
+            }
+            i = i / 2;
+            if (i > best_count) {
+                best_count = i;
+                best_interval = best_interval + offsets[k];
+            }
+        }
+        if (best_count > move.count) {
+            move.interval = best_interval;
+            move.count = best_count;
+            move.add = 0;
+            // Forward bias
+            sc->Ic[0] = best_interval;
+        }
     }
 
     // Linear Least Squares
     // Math magic, I would say
     struct lls_state S = {
-      .S_k = .0,
-      .S_k2 = .0,
-      .S_y = .0,
-      .S_ky = .0,
+      .S_k = 0,
+      .S_k2 = 0,
+      .S_y = 0,
+      .S_ky = 0,
       .n = 0,
     };
 
     uint32_t i = 0;
+    // Preseed
     lls_add_point(&S, i, sc->Ic[i]); i++;
     lls_add_point(&S, i, sc->Ic[i]); i++;
-    // Used later
-    int ret = 0;
-    // Fast exponential pass
-    // Initial value is some in vivo constant which make the overral fit for
-    // discrete integer data better.
-    // But suffecently small to not waste cycles on the not encodable sequences
-    for (int k = 64; k < steps; k = k*2) {
-        if (k > steps)
-            k = steps;
+    // Fast exponential search
+    int k = 4;
+    if (steps > 128)
+        k = 16;
+    for (; k < steps; k = k*2) {
         for (; i < k; i++) {
             sc->Ic[i] = pos[i] - pos[i-1];
             lls_add_point(&S, i, sc->Ic[i]);
@@ -245,9 +302,9 @@ compress_bisect_add(struct stepcompress *sc)
         sc->Ic[i] = pos[i] - pos[i-1];
 
         struct ia_pair fit = lls_solve(&S);
-        int I_fit = fit.I_lo;
-        int A_fit = fit.A_lo;
-        ret = validate_move(sc, fit.I_lo, fit.A_lo, S.n);
+        uint32_t I_fit = fit.I_lo;
+        int16_t A_fit = fit.A_lo;
+        int ret = validate_move(sc, fit.I_lo, fit.A_lo, S.n);
         if (ret != 0) {
             // neiborhood search
             ret = validate_move(sc, fit.I_hi, fit.A_hi, S.n);
@@ -256,37 +313,34 @@ compress_bisect_add(struct stepcompress *sc)
             I_fit = fit.I_hi;
             A_fit = fit.A_hi;
         }
-
-        move.add = A_fit;
-        move.interval = I_fit;
-        move.count = i;
+        if (S.n > move.count) {
+            move.count = S.n;
+            move.interval = I_fit;
+            move.add = A_fit;
+        }
     }
-    steps = i;
 
     // I always forget that calculations
     // addfactor = count * (count - 1) / 2;
     // predicted = lsc + interval * count + add * addfactor;
     uint32_t left = move.count;
-    uint32_t right = steps;
+    uint32_t right = i;
     // Binary search pass
     while (left < right) {
         uint32_t mid = left + (right - left) / 2;
-        // fprintf(stderr, "call_id:\t%i| left: %d, right: %d\n", call_id, left, right);
         for (; i < mid; i++) {
             lls_add_point(&S, i, sc->Ic[i]);
         }
         for (; i > mid; i--) {
-            lls_remove_point(&S, i, sc->Ic[i-1]);
+            lls_remove_point(&S, i-1, sc->Ic[i-1]);
         }
 
         struct ia_pair fit = lls_solve(&S);
-        // int I_fit = 0;
-        // int A_fit = 0;
         int I_fit = fit.I_lo;
         int A_fit = fit.A_lo;
-        ret = validate_move(sc, fit.I_lo, fit.A_lo, S.n);
+        int ret = validate_move(sc, fit.I_lo, fit.A_lo, S.n);
         if (ret != 0) {
-            // neiborhood search
+            // neighborhood search
             ret = validate_move(sc, fit.I_hi, fit.A_hi, S.n);
             if (ret != 0) {
                 right = mid - 1;
@@ -298,16 +352,21 @@ compress_bisect_add(struct stepcompress *sc)
 
         // Match, try further
         left = mid + 1;
-        // fprintf(stderr, "call_id:\t%i| k: %i, I_fit: %i, A_fit: %i\n", call_id, S.n_points, I_fit, A_fit);
-        move.add = A_fit;
-        move.interval = I_fit;
-        move.count = S.n;
+        if (S.n > move.count) {
+            move.count = S.n;
+            move.add = A_fit;
+            move.interval = I_fit;
+        }
+        // if (S.n == 2 && abs(move.add) < 3)
+            // fprintf(stderr, "call_id:\t%i| k: %i, I_fit: %i, A_fit: %i\n", call_id, S.n, I_fit, A_fit);
     }
 
 out:
-    // fprintf(stderr, "call_id:\t%i| m.c: %d, m:i: %d, m:a %i\n", call_id, move.count, move.interval, move.add);
+    // if (move.count == 2 && abs(move.add) < 3)
+    //     fprintf(stderr, "call_id:\t%i| m.c: %d/%d, m:i: %d, m:a %i\n", call_id, move.count, steps, move.interval, move.add);
     sc->last_interval = move.interval;
     sc->last_add = move.add;
+    sc->last_count = move.count;
     return move;
 }
 
