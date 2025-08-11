@@ -163,29 +163,23 @@ validate_fit(struct stepcompress *sc, uint32_t I, int16_t A, uint16_t C)
 {
     // Predict
     uint32_t p = 0;
-    if (I == 0)
+    if (I > sc->cI[0])
+        return 1;
+    if (I < sc->cminI[0])
         return -1;
-    // Cast the line and fast check the end
-    p = I * C + A * C * (C - 1) / 2;
-    struct points point = minmax_point(sc, sc->queue_pos + (C-1));
-    if (p < point.minp) {
-        // fprintf(stderr, "call_id:\t%i| C: %d bounds: %d < %d \n", call_id, C, p, point.minp);
-        return -1;
-    }
-    if (p > point.maxp) {
-        // fprintf(stderr, "call_id:\t%i| C: %d bounds: %d > %d\n", call_id, C, p, point.maxp);
-        return +1;
-    }
-    p = 0;
-
-    for (int i = 0; i < C; i++) {
-        point = minmax_point(sc, sc->queue_pos + i);
+    // p = I * C + A * C * (C - 1) / 2;
+    p = I;
+    I += A;
+    for (int i = 1; i < C; i++) {
+        uint32_t prev_p = *(sc->queue_pos + i - 1) - sc->last_step_clock;
+        uint32_t maxp = prev_p + sc->cI[i];
+        uint32_t minp = prev_p + sc->cminI[i];
         p += I;
-        if (p < point.minp) {
+        if (p < minp) {
             // fprintf(stderr, "call_id:\t%i| bounds: %d < %d \n", call_id, p, point.minp);
             return -1;
         }
-        if (p > point.maxp) {
+        if (p > maxp) {
             // fprintf(stderr, "call_id:\t%i| bounds: %d > %d\n", call_id, p, point.maxp);
             return +1;
         }
@@ -340,6 +334,74 @@ compress_bisect_add(struct stepcompress *sc)
     if (move.count > sc->zero_add_limit)
         goto trim_tail;
 
+    // // Fit curve
+    // {
+    //     // Refit
+    //     move.count = 2;
+    //     // Use current add as a good start point
+    //     int32_t max_A = 0;
+    //     int32_t min_A = 0;
+    //     // We are slowing down
+    //     if (sc->cI[0] < sc->cI[1]) {
+    //         // next max error is equal or greater
+    //         max_A = sc->cI[1] - sc->cminI[0];
+    //         min_A = sc->cminI[1] - sc->cI[0];
+    //         // move.interval = sc->cminI[0];
+    //     // We are accelerating
+    //     } else if (sc->cI[0] > sc->cI[1]) {
+    //         max_A = sc->cminI[1] - sc->cI[0];
+    //         min_A = sc->cI[0] - sc->cminI[0];
+    //         // move.interval = sc->cI[0];
+    //     } else {
+    //         // something is off
+    //         // fprintf(stderr, "call_id:\t%i| something is off\n", call_id);
+    //         return move;
+    //     }
+    //     int32_t left = min_A;
+    //     int32_t right = max_A;
+    //     // Binary search pass
+    //     while (left <= right) {
+    //         int32_t mid = left + (right - left) / 2;
+    //         int32_t A = mid;
+    //         // we don't want to check first step
+    //         uint32_t I = move.interval;
+    //         uint32_t p = I;
+    //         I += A;
+    //         int c = 1;
+    //         for (; c < sc->cIsize; c++) {
+    //             uint32_t prev_p = *(pos + c - 1) - lsc;
+    //             uint32_t maxp = prev_p + sc->cI[c];
+    //             uint32_t minp = prev_p + sc->cminI[c];
+    //             p += I;
+    //             if (p < minp) {
+    //                 left = mid + 1;
+    //                 break;
+    //             }
+    //             if (p > maxp) {
+    //                 right = mid - 1;
+    //                 break;
+    //             }
+    //             I += A;
+    //         }
+
+    //         // Hit cache limit
+    //         if (c == sc->cIsize && c < steps) {
+    //             add_I_cache(sc, sc->cIsize * 2);
+    //             continue;
+    //         }
+
+    //         // fprintf(stderr, "call_id:\t%i| wtf: %i/%d\n", call_id, c, steps);
+    //         if (c > move.count) {
+    //             move.count = c;
+    //             move.add = A;
+    //             move.interval = I;
+    //         }
+    //         if (c == steps)
+    //             break;
+    //     }
+    // }
+
+    // return move;
 // Large hack to allow LLS greedy fit
 {
     // uint64_t sum = sc->last_interval;
@@ -458,7 +520,7 @@ trim_tail:
             sc->cI[i] = pos[i] - pos[i-1];
         }
         i = move.count - 1;
-        int wsize = 5;
+        int wsize = 4;
         float current_add = abs(move.add) + 0.5;
         for (; i > move.count / 4 * 3 + wsize; i--) {
             float add_avg = 0;
