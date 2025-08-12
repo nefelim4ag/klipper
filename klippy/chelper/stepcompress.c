@@ -438,7 +438,8 @@ trim_tail:
         }
         i = move.count - 1;
         int wsize = 4;
-        float current_add = abs(move.add) + 0.5;
+        float current_add_max = abs(move.add) + 0.5;
+        float current_add_min = abs(move.add) - 0.5;
         for (; i > move.count / 4 * 3 + wsize; i--) {
             float add_avg = 0;
             for (int k = i; k > i - wsize; k--) {
@@ -446,7 +447,9 @@ trim_tail:
                 add_avg += add;
             }
             add_avg = (add_avg) / wsize;
-            if (fabs(add_avg) > current_add)
+            if (fabs(add_avg) > current_add_max)
+                move.count--;
+            else if (fabs(add_avg < current_add_min))
                 move.count--;
             else
                 break;
