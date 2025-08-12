@@ -35,6 +35,7 @@ struct stepcompress {
     // Internal tracking
     uint32_t max_error;
     double mcu_time_offset, mcu_freq, last_step_print_time;
+    uint32_t recursion;
     // Message generation
     uint64_t last_step_clock;
     struct list_head msg_queue;
@@ -116,6 +117,7 @@ compress_bisect_add(struct stepcompress *sc)
     int32_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
     int32_t bestinterval = 0, bestcount = 1, bestadd = 1, bestreach = INT32_MIN;
     int32_t zerointerval = 0, zerocount = 0;
+    struct step_move move;
 
     for (;;) {
         // Find longest valid sequence with the given 'add'
@@ -127,7 +129,10 @@ compress_bisect_add(struct stepcompress *sc)
             nextcount++;
             if (&sc->queue_pos[nextcount-1] >= qlast) {
                 int32_t count = nextcount - 1;
-                return (struct step_move){ interval, count, add };
+                move.interval = interval;
+                move.count = count;
+                move.add = add;
+                goto out_trim;
             }
             nextpoint = minmax_point(sc, sc->queue_pos + nextcount - 1);
             int32_t nextaddfactor = nextcount*(nextcount-1)/2;
@@ -193,10 +198,59 @@ compress_bisect_add(struct stepcompress *sc)
             break;
         add = maxadd - (maxadd - minadd) / 4;
     }
-    if (zerocount + zerocount/16 >= bestcount)
+
+    move.interval = bestinterval;
+    move.count = bestcount;
+    move.add = bestadd;
+    if (zerocount + zerocount/16 >= bestcount) {
         // Prefer add=0 if it's similar to the best found sequence
-        return (struct step_move){ zerointerval, zerocount, 0 };
-    return (struct step_move){ bestinterval, bestcount, bestadd };
+        move.interval = zerointerval;
+        move.count = zerocount;
+        move.add = 0;
+    }
+
+
+out_trim:
+    if (sc->recursion)
+        return move;
+    uint32_t L = move.count/2;
+    if (L == 0)
+        L = 1;
+    uint32_t R = move.count;
+    uint32_t C = move.count;
+    uint32_t A = move.add;
+    uint32_t I = move.interval;
+    // Init with expected
+    uint32_t ticks = I * C + A * C * (C - 1) / 2;
+    uint64_t last_clock = sc->last_step_clock + ticks;
+    struct stepcompress dummy = {
+        .queue = sc->queue,
+        .queue_end = sc->queue_end,
+        .queue_pos = sc->queue_pos + move.count,
+        .queue_next = sc->queue_next,
+        .max_error = sc->max_error,
+        .last_step_clock = last_clock,
+        .recursion = 1,
+    };
+    struct step_move nextmove = compress_bisect_add(&dummy);
+    uint32_t totalreach = move.count + nextmove.count;
+    while (L <= R) {
+        uint32_t mid = L + (R - L) / 2;
+        C = mid;
+        uint32_t ticks = I * C + A * C * (C - 1) / 2;
+        uint64_t last_clock = sc->last_step_clock + ticks;
+        dummy.queue_pos = sc->queue_pos + C;
+        dummy.last_step_clock = last_clock;
+        struct step_move nextmove = compress_bisect_add(&dummy);
+        uint32_t nextreach = C + nextmove.count;
+        if (nextreach < totalreach) {
+            L = mid + 1;
+        } else {
+            R = mid - 1;
+            move.count = C;
+        }
+    }
+    return move;
 }
 
 static struct step_move
