@@ -176,11 +176,13 @@ validate_fit(struct stepcompress *sc, uint32_t I, int16_t A, uint16_t C)
         uint32_t minp = prev_p + sc->cminI[i];
         p += I;
         if (p < minp) {
-            // fprintf(stderr, "call_id:\t%i| bounds: %d < %d \n", call_id, p, point.minp);
+            // fprintf(stderr, "call_id:\t%i| bounds: %d < %d \n", call_id,
+            //                                        p, point.minp);
             return -1;
         }
         if (p > maxp) {
-            // fprintf(stderr, "call_id:\t%i| bounds: %d > %d\n", call_id, p, point.maxp);
+            // fprintf(stderr, "call_id:\t%i| bounds: %d > %d\n", call_id,
+            //                                         p, point.maxp);
             return +1;
         }
         I += A;
@@ -254,6 +256,7 @@ compress_bisect_add(struct stepcompress *sc)
         }
         move.count = 2;
         move.add = add;
+        // return move;
     }
 
     // Populate cache
@@ -305,7 +308,8 @@ compress_bisect_add(struct stepcompress *sc)
         if (c == steps)
             break;
     }
-    // fprintf(stderr, "call_id:\t%i| wtf: I_min: %d, left: %d, right: %d\n", call_id, I_min, left, right);
+    // fprintf(stderr, "call_id:\t%i| I_min: %d, left: %d, right: %d\n",
+    //                               call_id, I_min, left, right);
 
     uint32_t first_p_diff = I_max - move.interval;
     uint32_t mid_p_diff = 0;
@@ -327,93 +331,13 @@ compress_bisect_add(struct stepcompress *sc)
     // Probably should be rotated or bend around mid point
     if (first_p_diff > mid_p_diff && last_p_diff > mid_p_diff)
         move.count = move.count / 2;
-    // fprintf(stderr, "call_id:\t%i| f: %d, m: %d, l: %d\n", call_id, first_p_diff, mid_p_diff, last_p_diff);
+    // fprintf(stderr, "call_id:\t%i| f: %d, m: %d, l: %d\n", call_id,
+    //                  first_p_diff, mid_p_diff, last_p_diff);
 
     // return move;
 
     if (move.count > sc->zero_add_limit)
         goto trim_tail;
-
-    // // Fit curve
-    // {
-    //     // Refit
-    //     move.count = 2;
-    //     // Use current add as a good start point
-    //     int32_t max_A = 0;
-    //     int32_t min_A = 0;
-    //     // We are slowing down
-    //     if (sc->cI[0] < sc->cI[1]) {
-    //         // next max error is equal or greater
-    //         max_A = sc->cI[1] - sc->cminI[0];
-    //         min_A = sc->cminI[1] - sc->cI[0];
-    //         // move.interval = sc->cminI[0];
-    //     // We are accelerating
-    //     } else if (sc->cI[0] > sc->cI[1]) {
-    //         max_A = sc->cminI[1] - sc->cI[0];
-    //         min_A = sc->cI[0] - sc->cminI[0];
-    //         // move.interval = sc->cI[0];
-    //     } else {
-    //         // something is off
-    //         // fprintf(stderr, "call_id:\t%i| something is off\n", call_id);
-    //         return move;
-    //     }
-    //     int32_t left = min_A;
-    //     int32_t right = max_A;
-    //     // Binary search pass
-    //     while (left <= right) {
-    //         int32_t mid = left + (right - left) / 2;
-    //         int32_t A = mid;
-    //         // we don't want to check first step
-    //         uint32_t I = move.interval;
-    //         uint32_t p = I;
-    //         I += A;
-    //         int c = 1;
-    //         for (; c < sc->cIsize; c++) {
-    //             uint32_t prev_p = *(pos + c - 1) - lsc;
-    //             uint32_t maxp = prev_p + sc->cI[c];
-    //             uint32_t minp = prev_p + sc->cminI[c];
-    //             p += I;
-    //             if (p < minp) {
-    //                 left = mid + 1;
-    //                 break;
-    //             }
-    //             if (p > maxp) {
-    //                 right = mid - 1;
-    //                 break;
-    //             }
-    //             I += A;
-    //         }
-
-    //         // Hit cache limit
-    //         if (c == sc->cIsize && c < steps) {
-    //             add_I_cache(sc, sc->cIsize * 2);
-    //             continue;
-    //         }
-
-    //         // fprintf(stderr, "call_id:\t%i| wtf: %i/%d\n", call_id, c, steps);
-    //         if (c > move.count) {
-    //             move.count = c;
-    //             move.add = A;
-    //             move.interval = I;
-    //         }
-    //         if (c == steps)
-    //             break;
-    //     }
-    // }
-
-    // return move;
-// Large hack to allow LLS greedy fit
-{
-    // uint64_t sum = sc->last_interval;
-    // sum += move.interval;
-    // uint32_t p = sum/2;
-    // fprintf(stderr, "call_id:\t%i| i: %d/%d,  p: %d < %d < %d, a: %d\n", call_id, i, steps, point.minp, p, point.maxp, pos[i] - lsc);
-    // if (p >= I_min && p <= I_max) {
-    //     move.interval = p;
-    // }
-    // sc->cI[0] = (I_max + I_min)/2;
-
-}
 
     // Linear Least Squares
     // Math magic, I would say
@@ -501,13 +425,6 @@ compress_bisect_add(struct stepcompress *sc)
             move.interval = I_fit;
         }
     }
-
-//     // LLS resolves around mid point
-//     // Detect when real interval line is '/\'
-//     // And our line is just intersection
-//     {
-
-//     }
 
 trim_tail:
     // Trim linear overshoots
