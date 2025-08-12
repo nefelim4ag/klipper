@@ -253,13 +253,73 @@ lossless_compress(struct stepcompress *sc)
 }
 
 #define USE_LOSSLESS 0
+#define MOVE_CACHE 2
+#define FLAT_LINE_JITTER 2
 
-static struct step_move
-compress_steps(struct stepcompress *sc) {
+static void
+compress_steps(struct stepcompress *sc, struct step_move *moves) {
     if (USE_LOSSLESS)
-        return lossless_compress(sc);
-    else
-        return compress_bisect_add(sc);
+        moves[0] = lossless_compress(sc);
+    struct step_move zero = {0, 0, 0};
+    struct step_move *cmove = &moves[0];
+    struct step_move *nextmove = &moves[1];
+    // Init expected move
+    if (memcmp(cmove, &zero, sizeof(zero)) == 0)
+        *cmove = compress_bisect_add(sc);
+
+    if (sc->queue_pos + cmove->count >= sc->queue_next)
+        return;
+
+    // Short move, nothing to optimize
+    if (cmove->count < 4)
+        return;
+
+    // Init with expected
+    int32_t addfactor = cmove->count*(cmove->count-1)/2;
+    uint32_t ticks = cmove->add*addfactor + cmove->interval*(cmove->count-1);
+    uint64_t last_clock = sc->last_step_clock + cmove->interval + ticks;
+    struct stepcompress dummy = {
+        .queue = sc->queue,
+        .queue_end = sc->queue_end,
+        .queue_pos = sc->queue_pos + cmove->count,
+        .queue_next = sc->queue_next,
+        .max_error = sc->max_error,
+        .last_step_clock = last_clock,
+    };
+    *nextmove = compress_bisect_add(&dummy);
+    // Compute expected metrics
+    uint32_t totalreach = cmove->count + nextmove->count;
+    int I_last = cmove->interval + cmove->add * (cmove->count-1);
+    int I_next = nextmove->interval;
+    int jerk = abs(I_last - I_next);
+
+    uint16_t L = cmove->count/2;
+    uint16_t R = cmove->count;
+    int step_size = 4;
+    if (R - L <= step_size)
+        step_size = 1;
+    // Roll the dice for the optimal move.count
+    while (L <= R) {
+        uint16_t mid = L + (R - L) * step_size / (2 * step_size);
+        uint16_t C = mid;
+        addfactor = C*(C-1)/2;
+        ticks = cmove->add*addfactor + cmove->interval*(C-1);
+        dummy.queue_pos = sc->queue_pos + C;
+        last_clock = sc->last_step_clock + cmove->interval + ticks;
+        dummy.last_step_clock = last_clock;
+        struct step_move guessmove = compress_bisect_add(&dummy);
+        uint32_t nextreach = C + guessmove.count;
+        I_last = cmove->interval + cmove->add * (C-1);
+        I_next = guessmove.interval;
+        int32_t nextjerk = abs(I_last - I_next);
+        if (nextreach < totalreach || nextjerk + FLAT_LINE_JITTER > jerk) {
+            L = mid + step_size;
+        } else {
+            R = mid - step_size;
+            cmove->count = C;
+            *nextmove = guessmove;
+        }
+    }
 }
 
 /****************************************************************
@@ -436,19 +496,25 @@ queue_flush(struct stepcompress *sc, uint64_t move_clock)
 {
     if (sc->queue_pos >= sc->queue_next)
         return 0;
+    struct step_move zero = {0, 0, 0};
+    struct step_move moves[MOVE_CACHE] = {};
+    moves[0] = zero;
+    moves[1] = zero;
     while (sc->last_step_clock < move_clock) {
-        struct step_move move = compress_steps(sc);
-        int ret = check_line(sc, move);
+        compress_steps(sc, moves);
+        int ret = check_line(sc, moves[0]);
         if (ret)
             return ret;
 
-        add_move(sc, sc->last_step_clock + move.interval, &move);
+        add_move(sc, sc->last_step_clock + moves[0].interval, &moves[0]);
 
-        if (sc->queue_pos + move.count >= sc->queue_next) {
+        if (sc->queue_pos + moves[0].count >= sc->queue_next) {
             sc->queue_pos = sc->queue_next = sc->queue;
             break;
         }
-        sc->queue_pos += move.count;
+        sc->queue_pos += moves[0].count;
+        moves[0] = moves[1];
+        moves[1] = zero;
     }
     calc_last_step_print_time(sc);
     return 0;
