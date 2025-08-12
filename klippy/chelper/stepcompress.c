@@ -133,6 +133,7 @@ compress_bisect_add(struct stepcompress *sc)
     int32_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
     int32_t bestinterval = 0, bestcount = 1, bestadd = 1, bestreach = INT32_MIN;
     int32_t zerointerval = 0, zerocount = 0;
+    struct step_move move;
 
     for (;;) {
         // Find longest valid sequence with the given 'add'
@@ -144,7 +145,10 @@ compress_bisect_add(struct stepcompress *sc)
             nextcount++;
             if (&sc->queue_pos[nextcount-1] >= qlast) {
                 int32_t count = nextcount - 1;
-                return (struct step_move){ interval, count, add };
+                move.interval = interval;
+                move.count = count;
+                move.add = add;
+                goto out_trim;
             }
             nextpoint = minmax_point(sc, sc->queue_pos + nextcount - 1);
             int32_t nextaddfactor = nextcount*(nextcount-1)/2;
@@ -210,10 +214,43 @@ compress_bisect_add(struct stepcompress *sc)
             break;
         add = maxadd - (maxadd - minadd) / 4;
     }
-    if (zerocount + zerocount/16 >= bestcount)
+
+    move.interval = bestinterval;
+    move.count = bestcount;
+    move.add = bestadd;
+    if (zerocount + zerocount/16 >= bestcount) {
         // Prefer add=0 if it's similar to the best found sequence
-        return (struct step_move){ zerointerval, zerocount, 0 };
-    return (struct step_move){ bestinterval, bestcount, bestadd };
+        move.interval = zerointerval;
+        move.count = zerocount;
+        move.add = 0;
+    }
+
+
+out_trim:
+    {
+        uint32_t *pos = sc->queue_pos;
+        int i = move.count-1;
+        int wsize = 4;
+        float current_add_max = abs(move.add) + 0.5;
+        float current_add_min = abs(move.add) - 0.5;
+        for (; i > move.count / 4 * 3 + wsize; i--) {
+            float add_avg = 0;
+            for (int k = i; k > i - wsize; k--) {
+                int I_last = *(pos + k) - *(pos + k - 1);
+                int I_firs = *(pos + k - 1) - *(pos + k - 2);
+                int add = I_last - I_firs;
+                add_avg += add;
+            }
+            add_avg = (add_avg) / wsize;
+            if (fabs(add_avg) > current_add_max)
+                move.count--;
+            else if (fabs(add_avg < current_add_min))
+                move.count--;
+            else
+                break;
+        }
+    }
+    return move;
 }
 
 static struct step_move
