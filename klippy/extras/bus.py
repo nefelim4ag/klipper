@@ -270,7 +270,7 @@ class MCU_I2C:
             if status == "SUCCESS":
                 return param
             err = self._format_err(status)
-            raise mcu.error(err)
+            self.pause(self.monotonic() + r)
         raise mcu.error(err)
 
 def MCU_I2C_from_config(config, default_addr=None, default_speed=100000):
