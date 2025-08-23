@@ -92,10 +92,27 @@ minmax_point(struct stepcompress *sc, uint32_t *pos)
 {
     uint32_t lsc = sc->last_step_clock, point = *pos - lsc;
     uint32_t prevpoint = pos > sc->queue_pos ? *(pos-1) - lsc : 0;
-    uint32_t max_error = (point - prevpoint) / 2;
-    if (max_error > sc->max_error)
-        max_error = sc->max_error;
-    return (struct points){ point - max_error, point };
+    uint32_t nextpoint = *(pos + 1) - lsc;
+    // Shift window midpoint, allow overshoot
+    uint32_t half_error = sc->max_error / 2;
+    int32_t minp = point - half_error;
+    int32_t maxp = point + half_error;
+    // Narrow by nearby intervals
+    uint32_t max_error = (point - prevpoint) / 4;
+    if (max_error < half_error)
+        minp = point - max_error;
+    max_error = (nextpoint - point) / 4;
+    if (max_error < half_error)
+        maxp = point + max_error;
+    else
+        max_error = half_error;
+
+    // For itersolve correctness
+    // Disable overshoot of next (unknown) step
+    uint32_t cap_error = sc->queue_next - pos - 1;
+    if (cap_error < max_error)
+        maxp = point + cap_error;
+    return (struct points){ minp, maxp };
 }
 
 // The maximum add delta between two valid quadratic sequences of the
