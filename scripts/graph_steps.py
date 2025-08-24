@@ -46,45 +46,69 @@ def parse_log(logname, oid, skip, step_count):
 # Plotting and startup
 ######################################################################
 
-def plot_steps(data, oid, skip, diff_level):
+def plot_steps(data, oid, skip, diff_level, frequency):
     first_steps = first_intervals = first_adds = None
     # Build plot
-    fig, (ax1, ax2, ax3) = matplotlib.pyplot.subplots(nrows=3, sharex=True)
+    fig, (ax1, ax2, ax3, ax4) = matplotlib.pyplot.subplots(nrows=4, sharex=True)
     for logname, steps in data:
         count = len(steps)
         xaxis = list(range(skip+1, skip+1+count))
-        intervals = [steps[i+1] - steps[i] for i in range(count-1)]
+        intervals = []
+        velocities = []
+        for i in range(count-1):
+            interval = steps[i+1] - steps[i]
+            intervals.append(interval)
+            time = interval / frequency
+            velocities.append(0.003125/time)
         adds = [intervals[i+1] - intervals[i] for i in range(count-2)]
         if first_steps is None:
             first_steps = steps
             first_intervals = intervals
             first_adds = adds
+
         if diff_level > 0:
             diff = [s - fs for s, fs in zip(steps, first_steps)]
             ax1.step(xaxis[:len(diff)], diff, label=logname, alpha=0.8)
         else:
             ax1.step(xaxis, steps, label=logname, alpha=0.8)
+
+        ax2.step(xaxis[1:], velocities, label=logname, alpha=0.8)
+
         if diff_level > 1:
             diff = [s - fs for s, fs in zip(intervals, first_intervals)]
-            ax2.step(xaxis[1:len(diff)+1], diff, label=logname, alpha=0.8)
+            ax3.step(xaxis[1:len(diff)+1], diff, label=logname, alpha=0.8)
         else:
-            ax2.step(xaxis[1:], intervals, label=logname, alpha=0.8)
+            ax3.step(xaxis[1:], intervals, label=logname, alpha=0.8)
+
         if diff_level > 2:
             diff = [s - fs for s, fs in zip(adds, first_adds)]
-            ax3.step(xaxis[2:len(diff)+2], diff, label=logname, alpha=0.8)
+            ax4.step(xaxis[2:len(diff)+2], diff, label=logname, alpha=0.8)
         else:
-            ax3.step(xaxis[2:], adds, label=logname, alpha=0.8)
+            ax4.step(xaxis[2:], adds, label=logname, alpha=0.8)
     fontP = matplotlib.font_manager.FontProperties()
     fontP.set_size('x-small')
     ax1.set_title("Steps (oid=%d)" % (oid,))
     ax1.set_ylabel('Clock')
     ax1.legend(loc='best', prop=fontP)
     ax1.grid(True)
-    ax2.set_ylabel('Interval')
+    ax2.set_ylabel('Velocity')
     ax2.grid(True)
-    ax3.set_ylabel('Add')
+    ax3.set_ylabel('Interval')
     ax3.grid(True)
-    ax3.set_xlabel('Step')
+    ax4.set_ylabel('Add')
+    ax4.grid(True)
+    ax4.set_xlabel('Step')
+
+    # Tune limits
+    if ax2.get_ylim()[1] > 1000:
+        ax2.set_ylim((0, 1000))
+    if ax3.get_ylim()[1] > 1000_000:
+        ax3.set_ylim((0, 1000_000))
+    if ax4.get_ylim()[0] < -32768:
+        ax4.set_ylim((-32768, ax4.get_ylim()[1]))
+    if ax4.get_ylim()[1] > 32768:
+        ax4.set_ylim((ax4.get_ylim()[0], 32768))
+
     return fig
 
 def setup_matplotlib(output_to_file):
@@ -108,6 +132,8 @@ def main():
                     help="graph difference from first log (level)")
     opts.add_option("-o", "--output", type="string", dest="output",
                     default=None, help="filename of output graph")
+    opts.add_option("-f", "--frequency", type="int", default=24000000,
+                    help="MCU Frequency for speed calculation")
     options, args = opts.parse_args()
     if len(args) < 1:
         opts.error("Incorrect number of arguments")
@@ -125,7 +151,8 @@ def main():
 
     # Draw graph
     setup_matplotlib(options.output is not None)
-    fig = plot_steps(data, options.oid, options.skip, options.diff)
+    fig = plot_steps(data, options.oid, options.skip, options.diff,
+                     options.frequency)
 
     # Show graph
     if options.output is None:
