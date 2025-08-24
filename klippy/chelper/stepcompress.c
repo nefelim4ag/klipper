@@ -199,6 +199,71 @@ compress_bisect_add(struct stepcompress *sc)
     return (struct step_move){ bestinterval, bestcount, bestadd };
 }
 
+static struct step_move
+lossless_compress(struct stepcompress *sc)
+{
+    uint32_t steps = 128;
+    uint32_t *qlast = sc->queue_next;
+    if (qlast > sc->queue_pos + steps)
+        qlast = sc->queue_pos + steps;
+    steps = qlast - sc->queue_pos;
+    uint32_t cI[steps];
+
+    const uint32_t *pos = sc->queue_pos;
+    const uint32_t lsc = sc->last_step_clock;
+    struct step_move move = {
+        .interval = pos[0] - lsc,
+        .count = 1,
+        .add = 0,
+    };
+
+    cI[0] = pos[0] - lsc;
+    if (steps == 1)
+        return move;
+
+    cI[1] = pos[1] - pos[0];
+
+    // Perfect fit 2 points
+    int32_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
+    add = (int32_t)(cI[1]) - (int32_t)(cI[0]);
+    // knot
+    if (add < minadd || add > maxadd)
+        return move;
+    move.count = 2;
+    move.add = add;
+
+    if (move.add == 0) {
+        for (int i = 2; i < steps; i++) {
+            cI[i] = pos[i] - pos[i-1];
+            if (cI[i] == move.interval)
+                move.count++;
+            else
+                break;
+        }
+        return move;
+    }
+
+    for (int i = 2; i < steps; i++) {
+        cI[i] = pos[i] - pos[i-1];
+        int32_t add = (int32_t)(cI[i]) - (int32_t)(cI[i-1]);
+        if (move.add == add)
+            move.count++;
+        else
+            break;
+    }
+
+    return move;
+}
+
+#define USE_LOSSLESS 0
+
+static struct step_move
+compress_steps(struct stepcompress *sc) {
+    if (USE_LOSSLESS)
+        return lossless_compress(sc);
+    else
+        return compress_bisect_add(sc);
+}
 
 /****************************************************************
  * Step compress checking
@@ -382,7 +447,7 @@ queue_flush(struct stepcompress *sc, uint64_t move_clock)
     if (sc->queue_pos >= sc->queue_next)
         return 0;
     while (sc->last_step_clock < move_clock) {
-        struct step_move move = compress_bisect_add(sc);
+        struct step_move move = compress_steps(sc);
         int ret = check_line(sc, move);
         if (ret)
             return ret;
