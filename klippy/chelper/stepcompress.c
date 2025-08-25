@@ -109,6 +109,22 @@ minmax_point(struct stepcompress *sc, uint32_t *pos)
     return (struct points){ point - max_error, point };
 }
 
+static inline int32_t
+calculate_mae(struct stepcompress *sc, uint32_t I, uint32_t C, int32_t A)
+{
+    uint32_t *pos = sc->queue_pos;
+    uint32_t p = 0;
+    uint32_t sum = 0;
+    for (int i = 0; i < C; i++) {
+        p += I;
+        // According to minmax encoded sequence is always
+        // lower than the actual point
+        sum += (pos[i] - p);
+        I += A;
+    }
+    return sum/C;
+}
+
 // The maximum add delta between two valid quadratic sequences of the
 // form "add*count*(count-1)/2 + interval*count" is "(6 + 4*sqrt(2)) *
 // maxerror / (count*count)".  The "6 + 4*sqrt(2)" is 11.65685, but
@@ -204,9 +220,16 @@ compress_bisect_add(struct stepcompress *sc)
             break;
         add = maxadd - (maxadd - minadd) / 4;
     }
-    if (zerocount + zerocount/16 >= bestcount)
+    if (zerocount + zerocount/16 >= bestcount) {
+        uint32_t zero_mae = calculate_mae(sc, zerointerval, zerocount, 0);
+        uint32_t best_mae = calculate_mae(sc, zerointerval, zerocount, bestadd);
         // Prefer add=0 if it's similar to the best found sequence
-        return (struct step_move){ zerointerval, zerocount, 0 };
+        if (zero_mae <= best_mae)
+            return (struct step_move){ zerointerval, zerocount, 0 };
+        // else
+        //     fprintf(stderr, "MAE zero: %d, best: %d\n", zero_mae, best_mae);
+    }
+
     return (struct step_move){ bestinterval, bestcount, bestadd };
 }
 
