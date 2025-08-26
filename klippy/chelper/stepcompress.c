@@ -114,11 +114,12 @@ minmax_point(struct stepcompress *sc, uint32_t *pos)
 // maxerror / (count*count)".  The "6 + 4*sqrt(2)" is 11.65685, but
 // using 11 works well in practice.
 #define QUADRATIC_DEV 11
-
+static int call_id;
 // Find a 'step_move' that covers a series of step times
 static struct step_move
 compress_bisect_add(struct stepcompress *sc)
 {
+    call_id++;
     uint32_t *qlast = sc->queue_next;
     if (qlast > sc->queue_pos + 65535)
         qlast = sc->queue_pos + 65535;
@@ -128,6 +129,11 @@ compress_bisect_add(struct stepcompress *sc)
     int32_t bestinterval = 0, bestcount = 1, bestadd = 1, bestreach = INT32_MIN;
     int32_t zerointerval = 0, zerocount = 0;
 
+    // Fine by 3rd degree derivative (Jerk)
+    int32_t J_sum = 0;
+    int32_t Ji = 0;
+    int32_t I_prev = sc->queue_pos[0] - sc->last_step_clock;
+    int32_t A_prev = 0;
     for (;;) {
         // Find longest valid sequence with the given 'add'
         struct points nextpoint;
@@ -141,6 +147,21 @@ compress_bisect_add(struct stepcompress *sc)
                 return (struct step_move){ interval, count, add };
             }
             nextpoint = minmax_point(sc, sc->queue_pos + nextcount - 1);
+            if (nextcount > 2) {
+                for (; Ji < nextcount-1; Ji++) {
+                    int32_t I = sc->queue_pos[Ji+1] - sc->queue_pos[Ji];
+                    int32_t A = I - I_prev;
+                    J_sum += A - A_prev;
+                    I_prev = I;
+                    A_prev = A;
+                }
+                uint32_t max_error = nextpoint.maxp - nextpoint.minp;
+                if (max_error > abs(J_sum))
+                    max_error = max_error - abs(J_sum);
+                else
+                    max_error = 1;
+                nextpoint.minp = nextpoint.maxp - max_error;
+            }
             int32_t nextaddfactor = nextcount*(nextcount-1)/2;
             int32_t c = add*nextaddfactor;
             if (nextmininterval*nextcount < nextpoint.minp - c)
