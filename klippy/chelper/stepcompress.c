@@ -35,6 +35,7 @@ struct stepcompress {
     // Internal tracking
     uint32_t max_error;
     double mcu_time_offset, mcu_freq, last_step_print_time;
+    uint32_t last_interval;
     // Message generation
     uint64_t last_step_clock;
     struct list_head msg_queue;
@@ -127,6 +128,24 @@ compress_bisect_add(struct stepcompress *sc)
     int32_t add = 0, minadd = -0x8000, maxadd = 0x7fff;
     int32_t bestinterval = 0, bestcount = 1, bestadd = 1, bestreach = INT32_MIN;
     int32_t zerointerval = 0, zerocount = 0;
+    // Recenter around last interval
+    if (sc->last_interval <= outer_mininterval) {
+        uint32_t max_error = point.maxp - point.minp;
+        uint32_t qerr = max_error / 4;
+        outer_maxinterval = outer_mininterval + qerr;
+    } else if (sc->last_interval >= outer_maxinterval) {
+        uint32_t max_error = point.maxp - point.minp;
+        uint32_t qerr = max_error / 4;
+        outer_mininterval = outer_maxinterval - qerr;
+    } else if (outer_mininterval < sc->last_interval && sc->last_interval < outer_maxinterval) {
+        uint32_t max_error = point.maxp - point.minp;
+        uint32_t hqerr = max_error / 8;
+        uint32_t last_I = sc->last_interval;
+        if (last_I > hqerr && last_I - hqerr > point.minp)
+            outer_mininterval = last_I - hqerr;
+        if (last_I + hqerr < point.maxp)
+            outer_maxinterval = last_I + hqerr;
+    }
 
     for (;;) {
         // Find longest valid sequence with the given 'add'
@@ -312,6 +331,7 @@ check_line(struct stepcompress *sc, struct step_move move)
         }
         interval += move.add;
     }
+    sc->last_interval = interval;
     return 0;
 }
 
