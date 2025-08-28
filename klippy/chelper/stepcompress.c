@@ -211,11 +211,9 @@ compress_bisect_add(struct stepcompress *sc)
 
 
 out_trim:
-    if (sc->recursion)
+    if (sc->recursion || move.count < 3)
         return move;
     uint32_t L = move.count/2;
-    if (L == 0)
-        L = 1;
     uint32_t R = move.count;
     uint32_t C = move.count;
     uint32_t A = move.add;
@@ -234,6 +232,13 @@ out_trim:
     };
     struct step_move nextmove = compress_bisect_add(&dummy);
     uint32_t totalreach = move.count + nextmove.count;
+    int Jerk;
+    // Compute junction
+    {
+        int I_last = I + A * (C-1);
+        int I_next = nextmove.interval;
+        Jerk = abs(I_last - I_next);
+    }
     while (L <= R) {
         uint32_t mid = L + (R - L) / 2;
         C = mid;
@@ -243,7 +248,11 @@ out_trim:
         dummy.last_step_clock = last_clock;
         struct step_move nextmove = compress_bisect_add(&dummy);
         uint32_t nextreach = C + nextmove.count;
-        if (nextreach < totalreach) {
+        int I_last = I + A * (C-1);
+        int I_next = nextmove.interval;
+        int32_t nextjerk = abs(I_last - I_next);
+        uint32_t jitter = 2;
+        if (nextreach < totalreach || nextjerk + jitter > Jerk) {
             L = mid + 1;
         } else {
             R = mid - 1;
