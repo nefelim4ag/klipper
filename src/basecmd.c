@@ -280,6 +280,53 @@ config_reset(uint32_t *args)
 /****************************************************************
  * Timing and load stats
  ****************************************************************/
+static volatile uint32_t last_timer = 0;
+static volatile uint8_t is_measured = 0;
+
+static uint_fast8_t
+measure_event(struct timer *timer)
+{
+    last_timer = timer_read_time();
+    is_measured = 1;
+    return SF_DONE;
+}
+
+static struct timer measure = {
+    .func = measure_event,
+};
+
+void
+command_measure_timer(uint32_t *args)
+{
+    is_measured = 0;
+    output("Starting measure");
+    irq_disable();
+    sched_del_timer(&measure);
+    uint32_t before_interrupt = timer_read_time();
+    measure.waketime = before_interrupt + timer_from_us(50);
+    sched_add_timer(&measure);
+    irq_enable();
+
+    uint32_t timeout = measure.waketime + timer_from_us(50);
+    while (timer_is_before(before_interrupt, timeout)) {
+        irq_disable();
+        if (!is_measured)
+            before_interrupt = timer_read_time();
+        irq_enable();
+        if (is_measured)
+            break;
+    }
+
+    uint32_t after_interrupt = timer_read_time();
+    uint32_t enter_time = last_timer - before_interrupt;
+    uint32_t exit_time = after_interrupt - last_timer;
+    uint32_t total_time = after_interrupt - before_interrupt;
+    if (!is_measured)
+        output("Timeout? What?");
+    output("enter_time: %u, exit_time: %u, total: %u", enter_time,
+                                                 exit_time, total_time);
+}
+DECL_COMMAND(command_measure_timer, "measure_timer");
 
 void
 command_get_clock(uint32_t *args)
