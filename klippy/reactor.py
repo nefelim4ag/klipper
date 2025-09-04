@@ -9,6 +9,7 @@ import chelper, util
 
 _NOW = 0.
 _NEVER = 9999999999999999.
+_RUNNING = 9999999999999990.
 
 class ReactorTimer:
     def __init__(self, callback, waketime):
@@ -94,6 +95,7 @@ class ReactorMutex:
 class SelectReactor:
     NOW = _NOW
     NEVER = _NEVER
+    _RUNNING = _RUNNING
     def __init__(self, gc_checking=False):
         # Main code
         self._process = False
@@ -118,6 +120,8 @@ class SelectReactor:
         return tuple(self._last_gc_times)
     # Timers
     def update_timer(self, timer_handler, waketime):
+        if timer_handler.waketime == self._RUNNING:
+            return
         timer_handler.waketime = waketime
         self._next_timer = min(self._next_timer, waketime)
     def register_timer(self, callback, waketime=NEVER):
@@ -154,7 +158,7 @@ class SelectReactor:
         for t in self._timers:
             waketime = t.waketime
             if eventtime >= waketime:
-                t.waketime = self.NEVER
+                t.waketime = self._RUNNING
                 t.waketime = waketime = t.callback(eventtime)
                 if g_dispatch is not self._g_dispatch:
                     self._next_timer = min(self._next_timer, waketime)
