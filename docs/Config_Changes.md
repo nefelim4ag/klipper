@@ -8,6 +8,10 @@ All dates in this document are approximate.
 
 ## Changes
 
+20251010: During normal printing the command processing will now
+attempt to stay one second ahead of printer movement (reduced from two
+seconds previously).
+
 20250916: The definitions of EI, 2HUMP_EI, and 3HUMP_EI input shapers
 were updated. For best performance it is recommended to recalibrate
 input shapers, especially if some of these shapers are currently used.
