@@ -44,6 +44,7 @@ class PrinterNeoPixel:
         self.color_data = bytearray(len(self.color_map))
         self.update_color_data(self.led_helper.get_status()['color_data'])
         self.old_color_data = bytearray([d ^ 1 for d in self.color_data])
+        self._force_update = False
         # Register callbacks
         printer.register_event_handler("klippy:connect", self.send_data)
     def build_config(self):
@@ -65,8 +66,9 @@ class PrinterNeoPixel:
             color_data[cdidx] = int(led_state[lidx][cidx] * 255. + .5)
     def send_data(self, print_time=None):
         old_data, new_data = self.old_color_data, self.color_data
-        if new_data == old_data:
+        if new_data == old_data and not self._force_update:
             return
+        self._force_update = False
         # Find the position of all changed bytes in this framebuffer
         diffs = [[i, 1] for i, (n, o) in enumerate(zip(new_data, old_data))
                  if n != o]
@@ -96,6 +98,7 @@ class PrinterNeoPixel:
             if params['success']:
                 break
         else:
+            self._force_update = True
             logging.info("Neopixel update did not succeed")
     def update_leds(self, led_state, print_time):
         self.update_color_data(led_state)
