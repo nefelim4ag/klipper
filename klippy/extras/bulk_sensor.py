@@ -17,7 +17,7 @@ import logging, threading, struct
 # makes it easier to export the raw measurements via the webhooks
 # system (aka API Server).
 
-BATCH_INTERVAL = 0.500
+BATCH_INTERVAL = 0.250
 
 # Helper to process accumulated messages in periodic batches
 class BatchBulkHelper:
