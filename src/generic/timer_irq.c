@@ -32,7 +32,11 @@ timer_is_before(uint32_t time1, uint32_t time2)
 static uint32_t timer_repeat_until;
 #define TIMER_REPEAT_TICKS timer_from_us(100)
 
+#ifndef CONFIG_TIMER_IRQ_COST
 #define TIMER_MIN_TRY_TICKS timer_from_us(2)
+#else
+#define TIMER_MIN_TRY_TICKS CONFIG_TIMER_IRQ_COST
+#endif
 #define TIMER_DEFER_REPEAT_TICKS timer_from_us(5)
 
 // Invoke timers - called from board irq code.
