@@ -233,7 +233,15 @@ defs_std = """
     void free(void*);
 """
 
+# Makes CFFI API resolver happy
+defs_opaque_structs = """
+    struct stepper_kinematics;
+    struct trdispatch;
+    struct trapq;
+"""
+
 defs_all = [
+    defs_opaque_structs,
     defs_pyhelper, defs_serialqueue, defs_std, defs_stepcompress,
     defs_steppersync, defs_itersolve, defs_trapq, defs_trdispatch,
     defs_kin_cartesian, defs_kin_corexy, defs_kin_corexz, defs_kin_delta,
@@ -286,19 +294,29 @@ def check_build_c_library():
     destlib = get_abs_files(srcdir, [DEST_LIB])[0]
     if not check_build_code(srcfiles+ofiles+[__file__], destlib):
         # Code already built
-        return destlib
-    # Select command line options
+        return
+    FFI_main = cffi.FFI()
+    for d in defs_all:
+        FFI_main.cdef(d)
+    compile_args = ["-Wall", "-g", "-O2", "-fPIC"]
     if check_gcc_option(SSE_FLAGS):
-        cmd = "%s %s %s" % (GCC_CMD, SSE_FLAGS, COMPILE_ARGS)
-    else:
-        cmd = "%s %s" % (GCC_CMD, COMPILE_ARGS)
-    # Invoke compiler
-    logging.info("Building C code module %s", DEST_LIB)
+        compile_args.extend(["-mfpmath=sse", "-msse2"])
+    headers = ""
+    # Build dynamic header
+    for d in defs_all:
+        headers = headers + '\n' + d + '\n'
+    FFI_main.set_source("c_helper",
+                        headers,
+                        sources=srcfiles,
+                        include_dirs=[srcdir],
+                        extra_compile_args=compile_args)
     tempdestlib = get_abs_files(srcdir, ["_temp_" + DEST_LIB])[0]
-    do_build_code(cmd % (tempdestlib, ' '.join(srcfiles)))
-    # Rename from temporary file to final file name
+    FFI_main.compile(tmpdir=srcdir, target=tempdestlib)
     os.rename(tempdestlib, destlib)
-    return destlib
+    for file in ("c_helper.c", "c_helper.o"):
+        file = os.path.join(srcdir, file)
+        if os.path.exists(file):
+            os.remove(file)
 
 FFI_main = None
 FFI_lib = None
@@ -313,12 +331,18 @@ def get_ffi():
     global FFI_main, FFI_lib, pyhelper_logging_callback
     if FFI_lib is None:
         # Check if library needs to be built, and build if so
-        destlib = check_build_c_library()
-        # Open library
-        FFI_main = cffi.FFI()
-        for d in defs_all:
-            FFI_main.cdef(d)
-        FFI_lib = FFI_main.dlopen(destlib)
+        try:
+            from chelper import c_helper
+        except ImportError:
+            # Workaround Python 3 <-> 2 switch in CI
+            srcdir = os.path.dirname(os.path.realpath(__file__))
+            file = os.path.join(srcdir, DEST_LIB)
+            if os.path.exists(file):
+                os.remove(file)
+            check_build_c_library()
+            from chelper import c_helper
+        FFI_main = c_helper.ffi
+        FFI_lib = c_helper.lib
         # Setup error logging
         pyhelper_logging_callback = FFI_main.callback("void func(const char *)",
                                                       logging_callback)
