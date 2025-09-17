@@ -73,6 +73,7 @@ struct serialqueue {
     struct list_head old_sent, old_receive;
     // Stats
     uint32_t bytes_write, bytes_read, bytes_retransmit, bytes_invalid;
+    int owner;
 };
 
 #define SQPF_SERIAL 0
@@ -156,12 +157,16 @@ calculate_bittime(struct serialqueue *sq, uint32_t bytes)
 }
 
 int pthread_mutex_lock_wrp (pthread_mutex_t *__mutex, int line) {
+    struct serialqueue *sq = container_of(__mutex, struct serialqueue, lock);
     double start = get_monotonic();
     pthread_mutex_lock(__mutex);
     double end = get_monotonic();
     if (end - start > 0.000010) {
-        fprintf(stderr, "line: %i, mutex_wait: %f\n", line, end - start);
+        fprintf(stderr, "line: %i, hold by: %i, mutex_wait: %f\n",
+            line, sq->owner, end - start);
     }
+    sq->owner = line;
+    return 0;
 }
 
 // Update internal state when the receive sequence increases
