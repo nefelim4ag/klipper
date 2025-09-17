@@ -155,6 +155,15 @@ calculate_bittime(struct serialqueue *sq, uint32_t bytes)
     }
 }
 
+int pthread_mutex_lock_wrp (pthread_mutex_t *__mutex, int line) {
+    double start = get_monotonic();
+    pthread_mutex_lock(__mutex);
+    double end = get_monotonic();
+    if (end - start > 0.000010) {
+        fprintf(stderr, "line: %i, mutex_wait: %f\n", line, end - start);
+    }
+}
+
 // Update internal state when the receive sequence increases
 static void
 update_receive_seq(struct serialqueue *sq, double eventtime, uint64_t rseq)
@@ -220,7 +229,7 @@ update_receive_seq(struct serialqueue *sq, double eventtime, uint64_t rseq)
 static void
 handle_message(struct serialqueue *sq, double eventtime, int len)
 {
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 232);
 
     // Calculate receive sequence number
     uint32_t rseq_delta = ((sq->input_buf[MESSAGE_POS_SEQ] - sq->receive_seq)
@@ -336,7 +345,7 @@ input_event(struct serialqueue *sq, double eventtime)
         } else {
             // Skip bad data at beginning of input
             len = -len;
-            pthread_mutex_lock(&sq->lock);
+            pthread_mutex_lock_wrp(&sq->lock, 348);
             sq->bytes_invalid += len;
             pthread_mutex_unlock(&sq->lock);
         }
@@ -402,7 +411,7 @@ retransmit_event(struct serialqueue *sq, double eventtime)
             report_errno("tcflush", ret);
     }
 
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 414);
 
     // Retransmit all pending messages
     uint8_t buf[MESSAGE_MAX * MAX_PENDING_BLOCKS + 1];
@@ -583,7 +592,7 @@ check_send_command(struct serialqueue *sq, int pending, double eventtime)
 static double
 command_event(struct serialqueue *sq, double eventtime)
 {
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 595);
     uint8_t buf[MESSAGE_MAX * MAX_PENDING_BLOCKS];
     int buflen = 0;
     double waketime;
@@ -616,7 +625,7 @@ background_thread(void *data)
     set_thread_name(sq->name);
     pollreactor_run(sq->pr);
 
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 628);
     check_wake_receive(sq);
     pthread_mutex_unlock(&sq->lock);
 
@@ -762,7 +771,7 @@ serialqueue_free_commandqueue(struct command_queue *cq)
 void
 serialqueue_add_fastreader(struct serialqueue *sq, struct fastreader *fr)
 {
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 774);
     list_add_tail(&fr->node, &sq->fast_readers);
     pthread_mutex_unlock(&sq->lock);
 }
@@ -771,7 +780,7 @@ serialqueue_add_fastreader(struct serialqueue *sq, struct fastreader *fr)
 void
 serialqueue_rm_fastreader(struct serialqueue *sq, struct fastreader *fr)
 {
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 783);
     list_del(&fr->node);
     pthread_mutex_unlock(&sq->lock);
 
@@ -798,7 +807,7 @@ serialqueue_send_batch(struct serialqueue *sq, struct command_queue *cq
     qm = list_first_entry(msgs, struct queue_message, node);
 
     // Add list to cq->upcoming_queue
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 810);
     if (list_empty(&cq->ready_queue) && list_empty(&cq->upcoming_queue))
         list_add_tail(&cq->node, &sq->pending_queues);
     list_join_tail(msgs, &cq->upcoming_queue);
@@ -845,7 +854,7 @@ serialqueue_send(struct serialqueue *sq, struct command_queue *cq, uint8_t *msg
 void __visible
 serialqueue_pull(struct serialqueue *sq, struct pull_queue_message *pqm)
 {
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 857);
     // Wait for message to be available
     while (list_empty(&sq->receive_queue)) {
         if (pollreactor_is_exit(sq->pr))
@@ -883,7 +892,7 @@ exit:
 void __visible
 serialqueue_set_wire_frequency(struct serialqueue *sq, double frequency)
 {
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 895);
     if (sq->serial_fd_type == SQT_CAN) {
         sq->bittime_adjust = 1. / frequency;
     } else {
@@ -896,7 +905,7 @@ serialqueue_set_wire_frequency(struct serialqueue *sq, double frequency)
 void __visible
 serialqueue_set_receive_window(struct serialqueue *sq, int receive_window)
 {
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 908);
     sq->receive_window = receive_window;
     pthread_mutex_unlock(&sq->lock);
 }
@@ -908,7 +917,7 @@ serialqueue_set_clock_est(struct serialqueue *sq, double est_freq
                           , double conv_time, uint64_t conv_clock
                           , uint64_t last_clock)
 {
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 920);
     sq->ce.est_freq = est_freq;
     sq->ce.conv_time = conv_time;
     sq->ce.conv_clock = conv_clock;
@@ -920,7 +929,7 @@ serialqueue_set_clock_est(struct serialqueue *sq, double est_freq
 void
 serialqueue_get_clock_est(struct serialqueue *sq, struct clock_estimate *ce)
 {
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 932);
     memcpy(ce, &sq->ce, sizeof(sq->ce));
     pthread_mutex_unlock(&sq->lock);
 }
@@ -930,7 +939,7 @@ void __visible
 serialqueue_get_stats(struct serialqueue *sq, char *buf, int len)
 {
     struct serialqueue stats;
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 942);
     memcpy(&stats, sq, sizeof(stats));
     pthread_mutex_unlock(&sq->lock);
 
@@ -960,7 +969,7 @@ serialqueue_extract_old(struct serialqueue *sq, int sentq
     list_init(&current);
 
     // Atomically replace existing debug list with new zero'd list
-    pthread_mutex_lock(&sq->lock);
+    pthread_mutex_lock_wrp(&sq->lock, 972);
     list_join_tail(rootp, &current);
     list_init(rootp);
     list_join_tail(&replacement, rootp);
