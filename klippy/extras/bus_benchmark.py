@@ -22,6 +22,9 @@ class BusBenchmark:
         gcode.register_mux_command("BUS_LATENCY", "MCU", self.mcu_name,
                                    self.cmd_BUS_LATENCY,
                                    desc=self.cmd_BUS_LATENCY_help)
+        gcode.register_mux_command("BUS_LATENCY_NOP", "MCU", self.mcu_name,
+                                   self.cmd_BUS_LATENCY_NOP,
+                                   desc=self.cmd_BUS_LATENCY_NOP_help)
         gcode.register_mux_command("BUS_BANDWIDTH", "MCU", self.mcu_name,
                                    self.cmd_BUS_BANDWIDTH,
                                    desc=self.cmd_BUS_BANDWIDTH_help)
@@ -32,7 +35,8 @@ class BusBenchmark:
                     "debug_ping data=%*s",
                     "pong data=%*s",
                     cq=self.cmd_queue)
-
+        self.nop = self.mcu.lookup_command(
+                    "debug_nop",cq=self.cmd_queue)
     cmd_BUS_LATENCY_help = "Test e2e command dispatch latency"
     def cmd_BUS_LATENCY(self, gcmd):
         count = gcmd.get_int('COUNT', 10)
@@ -52,12 +56,38 @@ class BusBenchmark:
         mean_reactor = sum(times_reactor) / len(times_reactor)
         d = [ (i - mean_reactor) ** 2 for i in times_reactor]
         stddev = math.sqrt(sum(d) / len(d))
-        gcmd.respond_info("Reactor latency: mean=%.9fs stddev=%.9fs" % (
+        gcmd.respond_info("PING: Reactor latency mean=%.9fs stddev=%.9fs" % (
                             mean_reactor, stddev))
         mean_serial = sum(times_serial) / len(times_serial)
         d = [ (i - mean_serial) ** 2 for i in times_serial]
         stddev = math.sqrt(sum(d) / len(d))
-        gcmd.respond_info("Serial latency: mean=%.9fs stddev=%.9fs" % (
+        gcmd.respond_info("PING: Serial latency mean=%.9fs stddev=%.9fs" % (
+                            mean_serial, stddev))
+    cmd_BUS_LATENCY_NOP_help = "Test e2e ack latency"
+    def cmd_BUS_LATENCY_NOP(self, gcmd):
+        count = gcmd.get_int('COUNT', 10)
+        times_reactor = []
+        times_serial = []
+
+        for i in range(1, count + 1):
+            start = self.reactor.monotonic()
+            res = self.nop.send_wait_ack()
+            sent_time = res["#sent_time"]
+            recv_time = res["#receive_time"]
+            stop = self.reactor.monotonic()
+            diff = stop - start
+            times_reactor.append(diff)
+            diff_serial = recv_time - sent_time
+            times_serial.append(diff_serial)
+        mean_reactor = sum(times_reactor) / len(times_reactor)
+        d = [ (i - mean_reactor) ** 2 for i in times_reactor]
+        stddev = math.sqrt(sum(d) / len(d))
+        gcmd.respond_info("NOP: Reactor latency: mean=%.9fs stddev=%.9fs" % (
+                            mean_reactor, stddev))
+        mean_serial = sum(times_serial) / len(times_serial)
+        d = [ (i - mean_serial) ** 2 for i in times_serial]
+        stddev = math.sqrt(sum(d) / len(d))
+        gcmd.respond_info("NOP: Serial latency: mean=%.9fs stddev=%.9fs" % (
                             mean_serial, stddev))
 
     cmd_BUS_BANDWIDTH_help = "Test e2e bus bandwidht"
