@@ -63,11 +63,12 @@ class MCU_SPI:
                 " miso_pin=%s mosi_pin=%s sclk_pin=%s mode=%d pulse_ticks=%%d"
                 % (self.oid, sw_pins[0], sw_pins[1],
                     sw_pins[2], mode))
+            self.cmd_queue = mcu.alloc_command_queue(sw_pins)
         else:
             self.config_fmt = (
                 "spi_set_bus oid=%d spi_bus=%%s mode=%d rate=%d"
                 % (self.oid, mode, speed))
-        self.cmd_queue = mcu.alloc_command_queue()
+            self.cmd_queue = mcu.alloc_command_queue(bus)
         mcu.register_config_callback(self.build_config)
         self.spi_send_cmd = self.spi_transfer_cmd = None
     def setup_shutdown_msg(self, shutdown_seq):
