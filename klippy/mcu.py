@@ -617,6 +617,7 @@ class MCU:
         self._restart_cmds = []
         self._init_cmds = []
         self._mcu_freq = 0.
+        self._cmd_queues = {}
         # Move command queuing
         self._max_stepper_error = config.getfloat('max_stepper_error', 0.000025,
                                                   minval=0.)
@@ -898,8 +899,16 @@ class MCU:
         return self._name
     def register_response(self, cb, msg, oid=None):
         self._serial.register_response(cb, msg, oid)
-    def alloc_command_queue(self):
-        return self._serial.alloc_command_queue()
+    def alloc_command_queue(self, share_key=None):
+        if share_key is None:
+            return self._serial.alloc_command_queue()
+        queue = self._cmd_queues.get(share_key, None)
+        if queue is None:
+            queue = self._serial.alloc_command_queue()
+            self._cmd_queues[share_key] = queue
+        else:
+            logging.info("Share cmd queue for bus %s", share_key)
+        return queue
     def lookup_command(self, msgformat, cq=None):
         return CommandWrapper(self._serial, msgformat, cq,
                               debugoutput=self.is_fileoutput())
