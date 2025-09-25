@@ -18,11 +18,15 @@ class PrinterSysStats:
             pass
         self.cpu_pressure = None
         self.last_cpu_stall_us = 0
+        self.memory_pressure = None
+        self.last_memory_stall_us = 0
         try:
             cgroup_info = open("/proc/self/cgroup", "r").read()
             cgroup_name = cgroup_info.strip().split(':')[2]
             cgroup_path = "/sys/fs/cgroup/%s" % cgroup_name
             self.cpu_pressure = open("%s/cpu.pressure" % (cgroup_path), "r")
+            self.memory_pressure = open("%s/memory.pressure" %
+                                        (cgroup_path), "r")
         except:
             pass
         printer.register_event_handler("klippy:disconnect", self._disconnect)
@@ -69,6 +73,24 @@ class PrinterSysStats:
                 if cpu_stall_us is not None:
                     stallf = float(cpu_stall_us) / 1000000
                     msg = "%s cpustall=%.3f" % (msg, stallf)
+            except:
+                pass
+        if self.memory_pressure is not None:
+            try:
+                self.memory_pressure.seek(0)
+                data = self.memory_pressure.read()
+                some = ""
+                for line in data.split('\n'):
+                    if line.startswith("some"):
+                        some = line
+                        break
+                memory_stall_us = None
+                for kv in some.split(" "):
+                    if kv.startswith("total"):
+                        memory_stall_us = int(kv.split("=")[1])
+                if memory_stall_us is not None:
+                    stallf = float(memory_stall_us) / 1000000
+                    msg = "%s memstall=%.3f" % (msg, stallf)
             except:
                 pass
         return (False, msg)
