@@ -198,14 +198,14 @@ class MCU_TMC_SPI_chain:
                 data + [0x00] * ((chain_pos - 1) * 5))
     def reg_read(self, reg, chain_pos):
         cmd = self._build_cmd([reg, 0x00, 0x00, 0x00, 0x00], chain_pos)
-        self.spi.spi_send(cmd)
         if self.printer.get_start_args().get('debugoutput') is not None:
+            self.spi.spi_send(cmd)
             return {
                 "spi_status": 0,
                 "data": 0,
                 "#receive_time": .0,
             }
-        params = self.spi.spi_transfer(cmd)
+        params = self.spi.spi_transfer_with_preface(cmd, cmd)
         pr = bytearray(params['response'])
         pr = pr[(self.chain_len - chain_pos) * 5 :
                 (self.chain_len - chain_pos + 1) * 5]
