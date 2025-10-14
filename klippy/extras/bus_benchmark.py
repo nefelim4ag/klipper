@@ -15,6 +15,8 @@ class BusBenchmark:
         self.mcu = mcu.get_printer_mcu(self.printer, self.mcu_name)
         self.cmd_queue = self.mcu.alloc_command_queue()
         self.reactor = self.printer.get_reactor()
+        self.times = {}
+        self.counter = 0
 
         # Register commands
         self.name = config.get_name().split()[1]
@@ -35,6 +37,8 @@ class BusBenchmark:
                     "debug_ping data=%*s",
                     "pong data=%*s",
                     cq=self.cmd_queue)
+        self.ping_async = self.mcu.lookup_command(
+                    "debug_ping data=%*s", cq=self.cmd_queue)
         self.nop = self.mcu.lookup_command(
                     "debug_nop",cq=self.cmd_queue)
     cmd_BUS_LATENCY_help = "Test e2e command dispatch latency"
@@ -68,7 +72,6 @@ class BusBenchmark:
         count = gcmd.get_int('COUNT', 10)
         times_reactor = []
         times_serial = []
-
         for i in range(1, count + 1):
             start = self.reactor.monotonic()
             res = self.nop.send_wait_ack()
@@ -90,31 +93,63 @@ class BusBenchmark:
         gcmd.respond_info("NOP: Serial latency: mean=%.9fs stddev=%.9fs" % (
                             mean_serial, stddev))
 
+    def _pong(self, res):
+        stop = self.reactor.monotonic()
+        data = res["data"]
+        if len(data) == 0:
+            return
+        self.counter += 1
+        sent_time = res["#sent_time"]
+        recv_time = res["#receive_time"]
+        data = data.decode("utf-8")
+        start, i = data.split(",")
+        start = float(start)
+        diff = stop - start
+        self.times["reactor"].append(diff)
+        self.times["stop"] = stop
+        diff_serial = recv_time - sent_time
+        self.times["serial"].append(diff_serial)
+
     cmd_BUS_BANDWIDTH_help = "Test e2e bus bandwidht"
     def cmd_BUS_BANDWIDTH(self, gcmd):
         count = gcmd.get_int('COUNT', 10)
-        size = 48
-        times = []
-        data = []
-        for i in range(1, size + 1):
-            data.append(i % 16)
-
+        size = 53
+        self.times["reactor"] = []
+        self.times["serial"] = []
+        self.counter = 0
+        self.mcu.register_response(self._pong, "pong")
+        _start = self.reactor.monotonic()
         for i in range(1, count + 1):
             start = self.reactor.monotonic()
-            self.ping.send([data])
-            stop = self.reactor.monotonic()
-            data.append(data.pop(0))
-            diff = stop - start
-            times.append(diff)
-        mean = sum(times) / len(times)
-        d = [ (i - mean) ** 2 for i in times]
+            data = "%*.9f,%*d" % (size//2, start, size//2, i)
+            self.ping_async.send([data.encode("utf-8")])
+        self.reactor.pause(self.reactor.monotonic() + 0.1)
+        self.nop.send_wait_ack()
+        self.mcu.register_response(None, "pong")
+
+        mean = sum(self.times["reactor"]) / len(self.times["reactor"])
+        d = [ (i - mean) ** 2 for i in self.times["reactor"]]
         stddev = math.sqrt(sum(d) / len(d))
-        gcmd.respond_info("Latency: mean=%.9fs stddev=%.9fs" % (mean, stddev))
-        # write == read size
-        bps = len(data) * 8 * count * 2 / sum(times)
-        gcmd.respond_info("Approximate bandwidth: %.2f bps" % (bps))
-        gcmd.respond_info("Transfered: %d * %d * 2 = %.2f bytes" %
-                          (len(data), count, len(data) * count * 2))
+        gcmd.respond_info("Reactor latency mean=%.6fs stddev=%.6fs" % (
+            mean, stddev))
+
+        size += 1 + 3 + 3 # ???
+        mean = sum(self.times["serial"]) / len(self.times["serial"])
+        d = [ (i - mean) ** 2 for i in self.times["serial"]]
+        stddev = math.sqrt(sum(d) / len(d))
+        gcmd.respond_info("Serial latency mean=%.6fs stddev=%.6fs" % (
+            mean, stddev))
+
+        bps = size * count / (self.times["stop"] - _start)
+        gcmd.respond_info("Bandwidth to mcu: ~%.2f Byte/s" % (bps))
+        bps = size * self.counter / (self.times["stop"] - _start)
+        gcmd.respond_info("Bandwidth from mcu: ~%.2f Byte/s" % (bps))
+        gcmd.respond_info("Transfered: %d * (%d + %d) = %.2f bytes" %
+                          (size, count, self.counter,
+                           size * (count + self.counter)))
+        self.counter = 0
+        self.times["reactor"] = []
+        self.times["serial"] = []
 
 def load_config_prefix(config):
     return BusBenchmark(config)
