@@ -427,6 +427,8 @@ class MCU_pwm:
         self._set_cmd = None
     def get_mcu(self):
         return self._mcu
+    def get_pin(self):
+        return self._pin
     def setup_max_duration(self, max_duration):
         self._max_duration = max_duration
     def setup_cycle_time(self, cycle_time, hardware_pwm=False):
