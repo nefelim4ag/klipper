@@ -258,6 +258,16 @@ class EddyGatherSamples:
             # No sensor readings - raise error in pull_probed()
             return 0.
         return samp_sum / samp_count
+    def pull_conv_samples(self):
+        conv_samples = []
+        bulk_samples = self._samples
+        self._samples = []
+        for bulk in bulk_samples:
+            data = bulk["data"]
+            self._calibration.apply_calibration(data)
+            for sample in data:
+                conv_samples.append(sample)
+        return conv_samples
     def _lookup_toolhead_pos(self, pos_time):
         toolhead = self._printer.lookup_object('toolhead')
         kin = toolhead.get_kinematics()
@@ -464,6 +474,12 @@ class PrinterEddyProbe:
         mcu_probe = EddyEndstopWrapper(self.sensor_helper, self.eddy_descend)
         probe.HomingViaProbeHelper(config, mcu_probe, self.param_helper)
         self.printer.add_object('probe', self)
+        name = config.get_name()
+        cname = name.split()[-1]
+        gcode = self.printer.lookup_object('gcode')
+        gcode.register_mux_command("PROBE_EDDY_QUERY", "CHIP",
+                                   cname, self.cmd_EDDY_QUERY,
+                                   desc=self.cmd_EDDY_QUERY_help)
     def add_client(self, cb):
         self.sensor_helper.add_client(cb)
     def get_probe_params(self, gcmd=None):
@@ -481,7 +497,17 @@ class PrinterEddyProbe:
         return self.probe_session.start_probe_session(gcmd)
     def register_drift_compensation(self, comp):
         self.calibration.register_drift_compensation(comp)
-
+    cmd_EDDY_QUERY_help = "Query the height detected by eddy current probe"
+    def cmd_EDDY_QUERY(self, gcmd):
+        reactor = self.printer.get_reactor()
+        # Force toolhead pause
+        self.printer.lookup_object('toolhead').get_last_move_time()
+        gather = EddyGatherSamples(self.printer, self.sensor_helper, self.calibration, 0)
+        reactor.pause(reactor.monotonic() + 1.0)
+        gather.finish()
+        samples = gather.pull_conv_samples()
+        for time, freq, z in samples:
+            gcmd.respond_info("T: %.4f, F: %.3f Z: %.6f" % (time, freq, z))
 class DummyDriftCompensation:
     def get_temperature(self):
         return 0.
