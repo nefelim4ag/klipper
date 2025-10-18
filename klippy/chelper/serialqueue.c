@@ -478,12 +478,14 @@ build_and_send_command(struct serialqueue *sq, uint8_t *buf, int pending
         struct command_queue *q, *cq = NULL;
         struct queue_message *qm = NULL;
         list_for_each_entry(q, &sq->ready_queues, ready.node) {
-            struct queue_message *m = list_first_entry(
-                &q->ready.msg_queue, struct queue_message, node);
-            if (m->req_clock < min_clock) {
-                min_clock = m->req_clock;
-                cq = q;
-                qm = m;
+            if (!list_empty(&q->ready.msg_queue)) {
+                struct queue_message *m = list_first_entry(
+                    &q->ready.msg_queue, struct queue_message, node);
+                if (m->req_clock < min_clock) {
+                    min_clock = m->req_clock;
+                    cq = q;
+                    qm = m;
+                }
             }
         }
         // Append message to outgoing command
@@ -582,15 +584,17 @@ check_send_command(struct serialqueue *sq, int pending, double eventtime)
     // Check if it is still needed to send messages from the ready_queues
     list_for_each_entry(cq, &sq->ready_queues, ready.node) {
         // Update min_ready_clock
-        struct queue_message *qm = list_first_entry(
-            &cq->ready.msg_queue, struct queue_message, node);
-        uint64_t req_clock = qm->req_clock;
-        double bgtime = pending ? idletime : sq->idle_time;
-        double bgoffset = MIN_REQTIME_DELTA + MIN_BACKGROUND_DELTA;
-        if (req_clock == BACKGROUND_PRIORITY_CLOCK)
-            req_clock = clock_from_time(&sq->ce, bgtime + bgoffset);
-        if (req_clock < min_ready_clock)
-            min_ready_clock = req_clock;
+        if (!list_empty(&cq->ready.msg_queue)) {
+            struct queue_message *qm = list_first_entry(
+                &cq->ready.msg_queue, struct queue_message, node);
+            uint64_t req_clock = qm->req_clock;
+            double bgtime = pending ? idletime : sq->idle_time;
+            double bgoffset = MIN_REQTIME_DELTA + MIN_BACKGROUND_DELTA;
+            if (req_clock == BACKGROUND_PRIORITY_CLOCK)
+                req_clock = clock_from_time(&sq->ce, bgtime + bgoffset);
+            if (req_clock < min_ready_clock)
+                min_ready_clock = req_clock;
+        }
     }
 
     // Check for messages to send
