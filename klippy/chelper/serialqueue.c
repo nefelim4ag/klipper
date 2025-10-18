@@ -535,6 +535,11 @@ check_send_command(struct serialqueue *sq, int pending, double eventtime)
     uint64_t ack_clock = clock_from_time(&sq->ce, idletime);
     uint64_t min_stalled_clock = MAX_CLOCK, min_ready_clock = MAX_CLOCK;
     struct command_queue *cq, *_ncq;
+    if (list_empty(&sq->upcoming_queues)) {
+        fprintf(stderr, "pure guess\n");
+        goto skip_loop;
+    }
+
     list_for_each_entry_safe(cq, _ncq, &sq->upcoming_queues, upcoming.node) {
         int not_in_ready_queues = list_empty(&cq->ready.msg_queue);
         // Move messages from the upcoming.msg_queue to the ready.msg_queue
@@ -558,6 +563,7 @@ check_send_command(struct serialqueue *sq, int pending, double eventtime)
         if (not_in_ready_queues && !list_empty(&cq->ready.msg_queue))
             list_add_tail(&cq->ready.node, &sq->ready_queues);
     }
+skip_loop:
     // Check if it is still needed to send messages from the ready_queues
     list_for_each_entry(cq, &sq->ready_queues, ready.node) {
         // Update min_ready_clock
