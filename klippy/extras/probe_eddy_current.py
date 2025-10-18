@@ -14,6 +14,7 @@ class EddyCalibration:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.name = config.get_name()
+        self.sparse_z = config.getfloat('sparse_z_map', 4.0, minval=4.0)
         self.drift_comp = DummyDriftCompensation()
         # Current calibration data
         self.cal_freqs = []
@@ -95,6 +96,12 @@ class EddyCalibration:
         max_z = 4.0
         samp_dist = 0.040
         req_zpos = [i*samp_dist for i in range(int(max_z / samp_dist) + 1)]
+        sparse_max_z = self.sparse_z
+        sparse_sdist = 0.5
+        last_z = int(req_zpos[-1]/sparse_sdist) + 1
+        sparse_cnt = int((sparse_max_z) / sparse_sdist) + 1
+        sparse_zpos = [i*sparse_sdist for i in range(int(last_z), sparse_cnt)]
+        req_zpos.extend(sparse_zpos)
         start_pos = toolhead.get_position()
         times = []
         for zpos in req_zpos:
@@ -107,8 +114,8 @@ class EddyCalibration:
             move(next_pos, move_speed)
             # Note sample timing
             start_query_time = toolhead.get_last_move_time() + 0.050
-            end_query_time = start_query_time + 0.100
-            toolhead.dwell(0.200)
+            end_query_time = start_query_time + 0.200
+            toolhead.dwell(0.300)
             # Find Z position based on actual commanded stepper position
             toolhead.flush_step_generation()
             kin_spos = {s.get_name(): s.get_commanded_position()
