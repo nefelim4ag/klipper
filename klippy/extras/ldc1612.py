@@ -196,7 +196,7 @@ class LDC1612:
                 if flags & 0x2:
                     logging.error("LDC1612: Conversion Watchdog timeout")
                 if flags & 0x1:
-                    pass # Amplitude error
+                    logging.info("Conversion Amplitude Error")
                 self.last_error_count += 1
             samples[count] = (round(ptime, 6), round(freq_conv * mv, 3), 999.9)
             count += 1
