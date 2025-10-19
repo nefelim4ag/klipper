@@ -161,6 +161,14 @@ class LDC1612:
             mv = val & 0x0fffffff
             if mv != val:
                 self.last_error_count += 1
+                if val & 0x80000000:
+                    logging.info("Conversion Under-range")
+                if val & 0x40000000:
+                    logging.info("Conversion Over-range")
+                if val & 0x20000000:
+                    logging.info("Conversion Watchdog Timeout")
+                if val & 0x10000000:
+                    logging.info("Conversion Amplitude Error")
             samples[count] = (round(ptime, 6), round(freq_conv * mv, 3), 999.9)
             count += 1
     # Start, stop, and process message batches
