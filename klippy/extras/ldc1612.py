@@ -44,6 +44,10 @@ class DriveCurrentCalibrate:
                                    "CHIP", self.name.split()[-1],
                                    self.cmd_LDC_CALIBRATE,
                                    desc=self.cmd_LDC_CALIBRATE_help)
+        gcode.register_mux_command("LDC_SET_DRIVE_CURRENT",
+                                   "CHIP", self.name.split()[-1],
+                                   self.cmd_LDC_SET_DRIVE_CURRENT,
+                                   desc=self.cmd_LDC_SET_DRIVE_CURRENT_help)
     def get_drive_current(self):
         return self.drive_cur
     cmd_LDC_CALIBRATE_help = "Calibrate LDC1612 DRIVE_CURRENT register"
@@ -71,7 +75,16 @@ class DriveCurrentCalibrate:
             "with the above and restart the printer." % (self.name, drive_cur))
         configfile = self.printer.lookup_object('configfile')
         configfile.set(self.name, 'reg_drive_current', "%d" % (drive_cur,))
-
+    cmd_LDC_SET_DRIVE_CURRENT_help = "Get/Set LDC1612 DRIVE_CURRENT register"
+    def cmd_LDC_SET_DRIVE_CURRENT(self, gcmd):
+        value = gcmd.get_int('VALUE', None)
+        if value is None:
+            val = self.sensor.read_reg(REG_DRIVE_CURRENT0)
+            value = val >> 11
+            gcmd.respond_info("Current: %d" % (value))
+            return
+        self.drive_cur = value
+        self.sensor.set_reg(REG_DRIVE_CURRENT0, value << 11)
 # Interface class to LDC1612 mcu support
 class LDC1612:
     def __init__(self, config, calibration=None):
