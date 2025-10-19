@@ -38,6 +38,7 @@ class DriveCurrentCalibrate:
         self.sensor = sensor
         self.drive_cur = config.getint("reg_drive_current", DRIVECUR,
                                        minval=0, maxval=31)
+        self.high_cur = config.getboolean("high_current_drive", False)
         self.name = config.get_name()
         gcode = self.printer.lookup_object('gcode')
         gcode.register_mux_command("LDC_CALIBRATE_DRIVE_CURRENT",
@@ -50,6 +51,8 @@ class DriveCurrentCalibrate:
                                    desc=self.cmd_LDC_SET_DRIVE_CURRENT_help)
     def get_drive_current(self):
         return self.drive_cur
+    def get_high_cur_flag(self):
+        return self.high_cur
     cmd_LDC_CALIBRATE_help = "Calibrate LDC1612 DRIVE_CURRENT register"
     def cmd_LDC_CALIBRATE(self, gcmd):
         is_in_progress = True
@@ -60,7 +63,10 @@ class DriveCurrentCalibrate:
         toolhead.dwell(0.100)
         toolhead.wait_moves()
         old_config = self.sensor.read_reg(REG_CONFIG)
-        self.sensor.set_reg(REG_CONFIG, 0x001 | (1<<9))
+        HIGH_CURRENT_DRV = int(self.high_cur) << 6
+        REF_CLK_SRC = 1 << 9
+        CFG = 0x001 | REF_CLK_SRC | HIGH_CURRENT_DRV
+        self.sensor.set_reg(REG_CONFIG, CFG)
         toolhead.wait_moves()
         toolhead.dwell(0.100)
         toolhead.wait_moves()
@@ -204,7 +210,13 @@ class LDC1612:
         self.set_reg(REG_CLOCK_DIVIDERS0, (1 << 12) | 1)
         self.set_reg(REG_ERROR_CONFIG, (0x1f << 11) | 1)
         self.set_reg(REG_MUX_CONFIG, 0x0208 | DEGLITCH)
-        self.set_reg(REG_CONFIG, 0x001 | (1<<12) | (1<<10) | (1<<9))
+        HIGH_CURRENT_DRV = int(self.dccal.get_high_cur_flag()) << 6
+        REF_CLK_SRC = 1 << 9
+        AUTO_AMP_DIS = 1 << 10
+        RP_OVERRIDE_EN = 1 << 12
+        CFG = 0x001 # constant
+        CFG |= RP_OVERRIDE_EN | AUTO_AMP_DIS | REF_CLK_SRC | HIGH_CURRENT_DRV
+        self.set_reg(REG_CONFIG, CFG)
         self.set_reg(REG_DRIVE_CURRENT0, self.dccal.get_drive_current() << 11)
         # Start bulk reading
         rest_ticks = self.mcu.seconds_to_clock(0.5 / self.data_rate)
