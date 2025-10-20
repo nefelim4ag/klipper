@@ -15,7 +15,12 @@ LDC1612_ADDR = 0x2a
 DEFAULT_LDC1612_FREQ = 12000000
 SETTLETIME = 0.005
 DRIVECUR = 15
-DEGLITCH = 0x05 # 10 Mhz
+DEGLITCH_OPTIONS = {
+    "1MHz": 1,
+    "3.3MHz": 4,
+    "10MHz": 5,
+    "33MHz": 3
+}
 
 LDC1612_MANUF_ID = 0x5449
 LDC1612_DEV_ID = 0x3055
@@ -97,6 +102,8 @@ class LDC1612:
         self.printer = config.get_printer()
         self.calibration = calibration
         self.dccal = DriveCurrentCalibrate(config, self)
+        self.deglitch = int(config.getchoice('deglitch', DEGLITCH_OPTIONS,
+                                             default="10MHz"))
         self.data_rate = 250
         # Setup mcu sensor_ldc1612 bulk query code
         self.i2c = bus.MCU_I2C_from_config(config,
@@ -209,7 +216,7 @@ class LDC1612:
         self.set_reg(REG_SETTLECOUNT0, int(SETTLETIME*self.frequency/16. + .5))
         self.set_reg(REG_CLOCK_DIVIDERS0, (1 << 12) | 1)
         self.set_reg(REG_ERROR_CONFIG, (0x1f << 11) | 1)
-        self.set_reg(REG_MUX_CONFIG, 0x0208 | DEGLITCH)
+        self.set_reg(REG_MUX_CONFIG, 0x0208 | self.deglitch)
         HIGH_CURRENT_DRV = int(self.dccal.get_high_cur_flag()) << 6
         REF_CLK_SRC = 1 << 9
         AUTO_AMP_DIS = 1 << 10
