@@ -68,23 +68,43 @@ class DriveCurrentCalibrate:
         toolhead.dwell(0.100)
         toolhead.wait_moves()
         old_config = self.sensor.read_reg(REG_CONFIG)
-        HIGH_CURRENT_DRV = int(self.high_cur) << 6
         REF_CLK_SRC = 1 << 9
-        CFG = 0x001 | REF_CLK_SRC | HIGH_CURRENT_DRV
+        CFG = 0x001 | REF_CLK_SRC
         self.sensor.set_reg(REG_CONFIG, CFG)
         toolhead.wait_moves()
         toolhead.dwell(0.100)
         toolhead.wait_moves()
         reg_drive_current0 = self.sensor.read_reg(REG_DRIVE_CURRENT0)
+        drive_cur_low = (reg_drive_current0 >> 6) & 0x1f
+        # Check for high current > 1.125 mA
+        drive_cur_high = 0
+        if drive_cur_low > 31 * 3 / 4:
+            HIGH_CURRENT_DRV = 1 << 6
+            CFG = 0x001 | REF_CLK_SRC | HIGH_CURRENT_DRV
+            self.sensor.set_reg(REG_CONFIG, CFG)
+            toolhead.wait_moves()
+            toolhead.dwell(0.100)
+            toolhead.wait_moves()
+            reg_drive_current0 = self.sensor.read_reg(REG_DRIVE_CURRENT0)
+            drive_cur_high = (reg_drive_current0 >> 6) & 0x1f
+        # Stop measurements
         self.sensor.set_reg(REG_CONFIG, old_config)
         is_in_progress = False
+        drive_cur = drive_cur_low
+        # High current > 1.5 mA
+        if drive_cur_high > 31 / 4:
+            drive_cur = drive_cur_high
+        use_high_cur = (drive_cur == drive_cur_high)
         # Report found value to user
-        drive_cur = (reg_drive_current0 >> 6) & 0x1f
         gcmd.respond_info(
+            "%s: high_current_drive: %s\n"
             "%s: reg_drive_current: %d\n"
             "The SAVE_CONFIG command will update the printer config file\n"
-            "with the above and restart the printer." % (self.name, drive_cur))
+            "with the above and restart the printer." % (
+                self.name, use_high_cur,
+                self.name, drive_cur))
         configfile = self.printer.lookup_object('configfile')
+        configfile.set(self.name, 'high_current_drive', "%s" % (use_high_cur,))
         configfile.set(self.name, 'reg_drive_current', "%d" % (drive_cur,))
     cmd_LDC_SET_DRIVE_CURRENT_help = "Get/Set LDC1612 DRIVE_CURRENT register"
     def cmd_LDC_SET_DRIVE_CURRENT(self, gcmd):
