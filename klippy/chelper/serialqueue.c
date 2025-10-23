@@ -564,9 +564,8 @@ check_send_command(struct serialqueue *sq, int pending, double eventtime)
                              upcoming.node) {
         int not_in_ready_queues = list_empty(&cq->ready.msg_queue);
         // Move messages from the upcoming.msg_queue to the ready.msg_queue
-        while (!list_empty(&cq->upcoming.msg_queue)) {
-            struct queue_message *qm = list_first_entry(
-                &cq->upcoming.msg_queue, struct queue_message, node);
+        struct queue_message *qm, *_nqm;
+        list_for_each_entry_safe(qm, _nqm, &cq->upcoming.msg_queue, node) {
             if (ack_clock < qm->min_clock) {
                 if (qm->min_clock < min_stalled_clock)
                     min_stalled_clock = qm->min_clock;
