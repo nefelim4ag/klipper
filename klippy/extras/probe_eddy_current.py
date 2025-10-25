@@ -95,7 +95,7 @@ class EddyCalibration:
         # Move to each 40um position
         max_z = 4.0
         samp_dist = 0.040
-        req_zpos = [i*samp_dist for i in range(int(max_z / samp_dist) + 1)]
+        req_zpos = [i*samp_dist for i in range(0, int(max_z / samp_dist) + 1)]
         sparse_max_z = self.sparse_z
         sparse_sdist = 0.5
         last_z = int(req_zpos[-1]/sparse_sdist) + 1
