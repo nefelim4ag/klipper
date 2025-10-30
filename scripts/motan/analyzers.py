@@ -209,6 +209,64 @@ class GenSmoothed:
         return data
 AHandlers["smooth"] = GenSmoothed
 
+class GenSOSFilter:
+    ParametersMin = 5
+    ParametersMax = 5
+    DataSets = [
+        ('sos(<dataset>,{filt,filtfilt},lowpass,<order>,<hz>)',
+         'SOS lowpass filtered dataset'),
+        ('sos(<dataset>,{filt,filtfilt},notch,<hz>,<quality>)',
+         'SOS notch filtered dataset'),
+    ]
+    def __init__(self, amanager, name_parts):
+        self.amanager = amanager
+        self.source = name_parts[1]
+
+        from numpy import array
+        from scipy.signal import sosfiltfilt, sosfilt
+        self.array = array
+        type = name_parts[2]
+        if type == "filt":
+            self.sosfilt = sosfilt
+        elif type == "filtfilt":
+            self.sosfilt = sosfiltfilt
+        else:
+            amanager.error("Unknown sos type '%s'" % (type,))
+
+        filter_type = name_parts[3]
+        order = int(name_parts[4])
+        amanager.setup_dataset(self.source)
+        inv_seg_time = 1.0 / amanager.get_segment_time()
+
+        if filter_type == 'lowpass':
+            from scipy.signal import butter
+            cutoff = float(name_parts[5])
+            self.sos = butter(order, cutoff, fs=inv_seg_time,
+                              output='sos', btype='low')
+            self.filter_desc = "lowpass %.1fHz order %d" % (cutoff, order)
+        elif filter_type == 'notch':
+            from scipy.signal import iirnotch, tf2sos
+            freq = float(name_parts[4])
+            quality = float(name_parts[5])
+            b, a = iirnotch(freq, Q=quality, fs=inv_seg_time)
+            self.sos = tf2sos(b, a)[0]
+            self.filter_desc = "notch %.1fHz Q: %.1f" % (freq, quality)
+        else:
+            raise amanager.error("Unknown filter type '%s'" % (filter_type,))
+
+    def get_label(self):
+        label = self.amanager.get_label(self.source)
+        lname = "SOS %s (%s)" % (self.filter_desc, label['label'])
+        return {'label': lname, 'units': label['units']}
+
+    def generate_data(self):
+        data = self.amanager.get_datasets()[self.source]
+        data_array = self.array(data)
+        filtered = self.sosfilt(self.sos, data_array)
+        return filtered.tolist()
+
+AHandlers["sos"] = GenSOSFilter
+
 # Calculate a kinematic stepper position from the toolhead requested position
 class GenKinematicPosition:
     ParametersMin = ParametersMax = 1
