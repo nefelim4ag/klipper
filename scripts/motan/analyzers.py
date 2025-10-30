@@ -16,13 +16,23 @@ AHandlers = {}
 
 # Calculate a derivative (position to velocity, or velocity to accel)
 class GenDerivative:
-    ParametersMin = ParametersMax = 1
+    ParametersMin = 1
+    ParametersMax = 2
     DataSets = [
         ('derivative(<dataset>)', 'Derivative of the given dataset'),
+        ('derivative(<dataset>,ffreader)',
+         'Derivative of the given dataset, but frequency fixed - dt = 1'),
     ]
     def __init__(self, amanager, name_parts):
         self.amanager = amanager
         self.source = name_parts[1]
+        self.ffreader = False
+        if len(name_parts) == 3:
+            type = name_parts[2]
+            if type == "ffreader":
+                self.ffreader = True
+            else:
+                amanager.error("Unknown filter type '%s'" % (type,))
         amanager.setup_dataset(self.source)
     def get_label(self):
         label = self.amanager.get_label(self.source)
@@ -41,6 +51,8 @@ class GenDerivative:
         return {'label': lname, 'units': units}
     def generate_data(self):
         inv_seg_time = 1. / self.amanager.get_segment_time()
+        if self.ffreader:
+            inv_seg_time = 1.
         data = self.amanager.get_datasets()[self.source]
         deriv = [(data[i+1] - data[i]) * inv_seg_time
                  for i in range(len(data)-1)]
