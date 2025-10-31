@@ -4,7 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging
-from . import bus, bulk_sensor
+from . import bus, bulk_sensor, sos_filter
 
 MIN_MSG_TIME = 0.100
 
@@ -149,6 +149,15 @@ class LDC1612:
         mcu.add_config_cmd("query_ldc1612 oid=%d rest_ticks=0"
                            % (oid,), on_restart=True)
         mcu.register_config_callback(self._build_config)
+        # Initial SOS Filter support
+        design = sos_filter.DigitalFilter(self.data_rate, config.error,
+                                          lowpass=40.0,
+                                          lowpass_order=1)
+        fixed_filter = sos_filter.FixedPointSosFilter(
+            design.get_filter_sections(), design.get_initial_state())
+        self.sos_filter = sos_filter.SosFilter(self.mcu,
+                                               self.i2c.get_command_queue(),
+                                               fixed_filter, 2)
         # Bulk sample message reading
         chip_smooth = self.data_rate * BATCH_UPDATES * 2
         self.ffreader = bulk_sensor.FixedFreqReader(mcu, chip_smooth, ">I")
@@ -174,6 +183,11 @@ class LDC1612:
             "query_ldc1612_home_state oid=%c",
             "ldc1612_home_state oid=%c homing=%c trigger_clock=%u",
             oid=self.oid, cq=cmdqueue)
+        if self.mcu.try_lookup_command("ldc1612_set_sos oid=%c sos_oid=%c"):
+            self.sos_filter.create_filter()
+            self.mcu.add_config_cmd("ldc1612_set_sos oid=%d sos_oid=%d"
+                               % (self.oid, self.sos_filter.get_oid()),
+                                    is_init=True)
     def get_mcu(self):
         return self.i2c.get_mcu()
     def read_reg(self, reg):

@@ -14,6 +14,7 @@
 #include "sched.h" // DECL_TASK
 #include "sensor_bulk.h" // sensor_bulk_report
 #include "trsync.h" // trsync_do_trigger
+#include "sos_filter.h" // sos_filter_oid_lookup
 
 enum {
     LDC_PENDING = 1<<0, LDC_HAVE_INTB = 1<<1,
@@ -33,6 +34,7 @@ struct ldc1612 {
     uint8_t trigger_reason, error_reason;
     uint32_t trigger_threshold;
     uint32_t homing_clock;
+    struct sos_filter *sf;
 };
 
 static struct task_wake ldc1612_wake;
@@ -66,6 +68,7 @@ command_config_ldc1612(uint32_t *args)
                                    , sizeof(*ld));
     ld->timer.func = ldc1612_event;
     ld->i2c = i2cdev_oid_lookup(args[1]);
+    ld->sf = NULL;
 }
 DECL_COMMAND(command_config_ldc1612, "config_ldc1612 oid=%c i2c_oid=%c");
 
@@ -76,9 +79,19 @@ command_config_ldc1612_with_intb(uint32_t *args)
     struct ldc1612 *ld = oid_lookup(args[0], command_config_ldc1612);
     ld->intb_pin = gpio_in_setup(args[2], 1);
     ld->flags = LDC_HAVE_INTB;
+    ld->sf = NULL;
 }
 DECL_COMMAND(command_config_ldc1612_with_intb,
              "config_ldc1612_with_intb oid=%c i2c_oid=%c intb_pin=%c");
+
+void
+command_ldc1612_set_sos(uint32_t *args)
+{
+    struct ldc1612 *ld = oid_lookup(args[0], command_config_ldc1612);
+    ld->sf = sos_filter_oid_lookup(args[1]);
+}
+DECL_COMMAND(command_ldc1612_set_sos,
+             "ldc1612_set_sos oid=%c sos_oid=%c");
 
 void
 command_ldc1612_setup_home(uint32_t *args)
@@ -129,6 +142,8 @@ check_home(struct ldc1612 *ld, uint32_t data)
         && timer_is_before(time, ld->homing_clock))
         return;
     homing_flags &= ~LH_AWAIT_HOMING;
+    if (ld->sf != NULL)
+        data = sosfilt(ld->sf, (int32_t)data);
     if (data > ld->trigger_threshold) {
         homing_flags = 0;
         ld->homing_clock = time;
