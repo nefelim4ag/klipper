@@ -124,7 +124,7 @@ class LDC1612:
         self.dccal = DriveCurrentCalibrate(config, self)
         self.deglitch = int(config.getchoice('deglitch', DEGLITCH_OPTIONS,
                                              default="10MHz"))
-        self.data_rate = 250
+        self.data_rate = 1000
         # Setup mcu sensor_ldc1612 bulk query code
         self.i2c = bus.MCU_I2C_from_config(config,
                                            default_addr=LDC1612_ADDR,
