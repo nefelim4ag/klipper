@@ -259,6 +259,7 @@ class GenSOSFilter:
     def generate_data(self):
         data = self.amanager.get_datasets()[self.source]
         data_array = self.array(data)
+        print(data_array[0])
         if self.type == "filt":
             zi = self.sosfilt_zi(self.sos) * data_array[0]
             filtered, _ = self.sosfilt(self.sos, data_array, zi=zi)
