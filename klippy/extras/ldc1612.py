@@ -4,7 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging
-from . import bus, bulk_sensor
+from . import bus, bulk_sensor, sos_filter
 
 MIN_MSG_TIME = 0.100
 
@@ -87,6 +87,7 @@ class LDC1612:
         self.oid = oid = mcu.create_oid()
         self.query_ldc1612_cmd = None
         self.ldc1612_setup_home_cmd = self.query_ldc1612_home_state_cmd = None
+        self.ldc1612_setup_tap_cmd = None
         self.frequency = config.getint("frequency", DEFAULT_LDC1612_FREQ,
                                        2000000, 40000000)
         if config.get('intb_pin', None) is not None:
@@ -103,6 +104,15 @@ class LDC1612:
         mcu.add_config_cmd("query_ldc1612 oid=%d rest_ticks=0"
                            % (oid,), on_restart=True)
         mcu.register_config_callback(self._build_config)
+        # Initial SOS Filter support
+        design = sos_filter.DigitalFilter(self.data_rate, config.error,
+                                          lowpass=25.0,
+                                          lowpass_order=2)
+        fixed_filter = sos_filter.FixedPointSosFilter(
+            design.get_filter_sections(), design.get_initial_state())
+        self.sos_filter = sos_filter.SosFilter(self.mcu,
+                                               self.i2c.get_command_queue(),
+                                               fixed_filter, 2)
         # Bulk sample message reading
         chip_smooth = self.data_rate * BATCH_UPDATES * 2
         self.ffreader = bulk_sensor.FixedFreqReader(mcu, chip_smooth, ">I")
@@ -121,13 +131,25 @@ class LDC1612:
             "query_ldc1612 oid=%c rest_ticks=%u", cq=cmdqueue)
         self.ffreader.setup_query_command("query_status_ldc1612 oid=%c",
                                           oid=self.oid, cq=cmdqueue)
+        self.ldc1612_setup_tap_cmd = self.mcu.lookup_command(
+            "ldc1612_setup_tap oid=%c clock=%u threshold=%i safe_max_value=%u"
+            " trsync_oid=%c trigger_reason=%c error_reason=%c", cq=cmdqueue)
         self.ldc1612_setup_home_cmd = self.mcu.lookup_command(
             "ldc1612_setup_home oid=%c clock=%u threshold=%u"
             " trsync_oid=%c trigger_reason=%c error_reason=%c", cq=cmdqueue)
+        self.query_ldc1612_tap_state_cmd = self.mcu.lookup_query_command(
+            "query_ldc1612_tap_state oid=%c",
+            "ldc1612_tap_state oid=%c homing=%c trigger_clock=%u",
+            oid=self.oid, cq=cmdqueue)
         self.query_ldc1612_home_state_cmd = self.mcu.lookup_query_command(
             "query_ldc1612_home_state oid=%c",
             "ldc1612_home_state oid=%c homing=%c trigger_clock=%u",
             oid=self.oid, cq=cmdqueue)
+        if self.mcu.try_lookup_command("ldc1612_set_sos oid=%c sos_oid=%c"):
+            self.sos_filter.create_filter()
+            self.mcu.add_config_cmd("ldc1612_set_sos oid=%d sos_oid=%d"
+                               % (self.oid, self.sos_filter.get_oid()),
+                                    is_init=True)
     def get_mcu(self):
         return self.i2c.get_mcu()
     def read_reg(self, reg):
@@ -146,11 +168,26 @@ class LDC1612:
         tfreq = int(trigger_freq * (1<<28) / float(self.frequency) + 0.5)
         self.ldc1612_setup_home_cmd.send(
             [self.oid, clock, tfreq, trsync_oid, hit_reason, err_reason])
+    def setup_tap(self, print_time, min_accel, max_safe_freq,
+                   trsync_oid, hit_reason, err_reason):
+        clock = self.mcu.print_time_to_clock(print_time)
+        safe_freq = int(max_safe_freq * (1<<28) / float(self.frequency) + 0.5)
+        self.sos_filter.reset_filter()
+        self.ldc1612_setup_tap_cmd.send(
+            [self.oid, clock, min_accel, safe_freq,
+             trsync_oid, hit_reason, err_reason])
     def clear_home(self):
         self.ldc1612_setup_home_cmd.send([self.oid, 0, 0, 0, 0, 0])
         if self.mcu.is_fileoutput():
             return 0.
         params = self.query_ldc1612_home_state_cmd.send([self.oid])
+        tclock = self.mcu.clock32_to_clock64(params['trigger_clock'])
+        return self.mcu.clock_to_print_time(tclock)
+    def clear_tap(self):
+        self.ldc1612_setup_tap_cmd.send([self.oid, 0, 0, 0, 0, 0, 0])
+        if self.mcu.is_fileoutput():
+            return 0.
+        params = self.query_ldc1612_tap_state_cmd.send([self.oid])
         tclock = self.mcu.clock32_to_clock64(params['trigger_clock'])
         return self.mcu.clock_to_print_time(tclock)
     # Measurement decoding

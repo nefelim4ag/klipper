@@ -369,6 +369,63 @@ class EddyDescend:
         self._gather.finish()
         self._gather = None
 
+# Helper for implementing PROBE style commands (descend until trigger)
+class EddyTap:
+    REASON_SENSOR_ERROR = mcu.MCU_trsync.REASON_COMMS_TIMEOUT + 1
+    def __init__(self, config, sensor_helper):
+        self._printer = config.get_printer()
+        self._sensor_helper = sensor_helper
+        self._mcu = sensor_helper.get_mcu()
+        self._z_min_position = probe.lookup_minimum_z(config)
+        self._z_offset = config.getfloat('z_offset', minval=0.)
+        self.safe_max_freq = config.getfloat('safe_max_freq')
+        self.tap_min_accel = config.getint('tap_min_accel', maxval=-1,
+                                           default=-10)
+        self._dispatch = mcu.TriggerDispatch(self._mcu)
+        self._trigger_time = 0.
+        self._need_stop = False
+        probe.LookupZSteppers(config, self._dispatch.add_stepper)
+    # Interface for phoming.probing_move()
+    def get_steppers(self):
+        return self._dispatch.get_steppers()
+    def home_start(self, print_time, sample_time, sample_count, rest_time,
+                   triggered=True):
+        self._trigger_time = 0.
+        trigger_completion = self._dispatch.start(print_time)
+        self._sensor_helper.setup_tap(
+            print_time, self.tap_min_accel, self.safe_max_freq,
+            self._dispatch.get_oid(), mcu.MCU_trsync.REASON_ENDSTOP_HIT,
+            self.REASON_SENSOR_ERROR)
+        return trigger_completion
+    def home_wait(self, home_end_time):
+        self._dispatch.wait_end(home_end_time)
+        trigger_time = self._sensor_helper.clear_tap()
+        res = self._dispatch.stop()
+        if res >= mcu.MCU_trsync.REASON_COMMS_TIMEOUT:
+            if res == mcu.MCU_trsync.REASON_COMMS_TIMEOUT:
+                raise self._printer.command_error(
+                    "Communication timeout during homing")
+            raise self._printer.command_error("Eddy current sensor error")
+        if res != mcu.MCU_trsync.REASON_ENDSTOP_HIT:
+            return 0.
+        if self._mcu.is_fileoutput():
+            return home_end_time
+        self._trigger_time = trigger_time
+        return trigger_time
+    def start_probe_session(self, gcmd):
+        self._need_stop = False
+        self._sensor_helper.add_client(self._add_measurement)
+    def _add_measurement(self, msg):
+        if self._need_stop:
+            return False
+        return True
+    def finish(self):
+        self._need_stop = True
+        return self
+    def end_probe_session(self):
+        self.finish()
+
+
 # Wrapper to emulate mcu_endstop for probe:z_virtual_endstop
 # Note that this does not provide accurate results
 class EddyEndstopWrapper:
@@ -403,6 +460,37 @@ class EddyEndstopWrapper:
         pass
     def get_position_endstop(self):
         return self._eddy_descend._z_offset
+
+class EddyTapEndstopWrapper:
+    def __init__(self, sensor_helper, eddy_tap):
+        self._sensor_helper = sensor_helper
+        self._eddy_tap = eddy_tap
+    # Interface for MCU_endstop
+    def get_mcu(self):
+        return self._sensor_helper.get_mcu()
+    def add_stepper(self, stepper):
+        pass
+    def get_steppers(self):
+        return self._eddy_tap.get_steppers()
+    def home_start(self, print_time, sample_time, sample_count, rest_time,
+                   triggered=True):
+        return self._eddy_tap.home_start(
+            print_time, sample_time, sample_count, rest_time, triggered)
+    def home_wait(self, home_end_time):
+        return self._eddy_tap.home_wait(home_end_time)
+    def query_endstop(self, print_time):
+        return False # XXX
+    # Interface for HomingViaProbeHelper
+    def multi_probe_begin(self):
+        self._eddy_tap.start_probe_session(None)
+    def multi_probe_end(self):
+        self._eddy_tap.end_probe_session()
+    def probe_prepare(self, hmove):
+        pass
+    def probe_finish(self, hmove):
+        pass
+    def get_position_endstop(self):
+        return .0
 
 # Implementing probing with "METHOD=scan"
 class EddyScanningProbe:
@@ -457,11 +545,13 @@ class PrinterEddyProbe:
         self.param_helper = probe.ProbeParameterHelper(config)
         self.eddy_descend = EddyDescend(
             config, self.sensor_helper, self.calibration, self.param_helper)
+        self.eddy_tap = EddyTap(config, self.sensor_helper)
         self.cmd_helper = probe.ProbeCommandHelper(config, self)
         self.probe_offsets = probe.ProbeOffsetsHelper(config)
         self.probe_session = probe.ProbeSessionHelper(
             config, self.param_helper, self.eddy_descend.start_probe_session)
         mcu_probe = EddyEndstopWrapper(self.sensor_helper, self.eddy_descend)
+        mcu_probe = EddyTapEndstopWrapper(self.sensor_helper, self.eddy_tap)
         probe.HomingViaProbeHelper(config, mcu_probe, self.param_helper)
         self.printer.add_object('probe', self)
     def add_client(self, cb):
