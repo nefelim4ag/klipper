@@ -105,7 +105,7 @@ class LDC1612:
         mcu.register_config_callback(self._build_config)
         # Initial SOS Filter support
         design = sos_filter.DigitalFilter(self.data_rate, config.error,
-                                          lowpass=40.0,
+                                          lowpass=25.0,
                                           lowpass_order=1)
         fixed_filter = sos_filter.FixedPointSosFilter(
             design.get_filter_sections(), design.get_initial_state())
