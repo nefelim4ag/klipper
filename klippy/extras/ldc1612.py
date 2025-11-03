@@ -231,7 +231,8 @@ class LDC1612:
         self.set_reg(REG_OFFSET0, 0)
         self.set_reg(REG_SETTLECOUNT0, int(SETTLETIME*self.frequency/16. + .5))
         self.set_reg(REG_CLOCK_DIVIDERS0, (1 << 12) | 1)
-        self.set_reg(REG_ERROR_CONFIG, (0x1f << 11) | 1)
+        # Amplitude report is disabled
+        self.set_reg(REG_ERROR_CONFIG, (0x1c << 11) | 1)
         self.set_reg(REG_MUX_CONFIG, 0x0208 | DEGLITCH)
         HIGH_CURRENT_DRV = int(self.dccal.get_high_cur_flag()) << 6
         REF_CLK_SRC = 1 << 9
