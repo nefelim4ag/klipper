@@ -126,6 +126,8 @@ class BusBenchmark:
             data = "%*.9f,%*d" % (size//2, start, size//2, i)
             self.ping_async.send([data.encode("utf-8")],
                                  reqclock=BACKGROUND_PRIORITY_CLOCK)
+            if i % 1000 == 0:
+                self.reactor.pause(self.reactor.NOW)
         self.reactor.pause(self.reactor.monotonic() + 0.1)
         self.nop.send_wait_ack()
         self.mcu.register_response(None, "pong")
