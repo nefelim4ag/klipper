@@ -18,7 +18,7 @@
  * Clock setup
  ****************************************************************/
 
-#define FREQ_PERIPH 64000000
+#define FREQ_PERIPH CONFIG_CLOCK_FREQ
 #define FREQ_USB 48000000
 
 // Map a peripheral address to its enable bits
