@@ -198,6 +198,16 @@ config MCU
     default "stm32l412xx" if MACH_STM32L412
     default "stm32f103xe" if MACH_N32G45x
 
+choice
+    depends on MACH_STM32G0 && LOW_LEVEL_OPTIONS
+    prompt "Processor speed"
+    config MACH_STM32G0_FREQ_64
+        bool "64 MHz (standard)"
+    config MACH_STM32G0_FREQ_96
+        bool "96 MHz (overclock)"
+endchoice
+
+
 config CLOCK_FREQ
     int
     default 48000000 if MACH_STM32F0
@@ -208,7 +218,8 @@ config CLOCK_FREQ
     default 168000000 if MACH_STM32F4x5
     default 180000000 if MACH_STM32F446
     default 216000000 if MACH_STM32F765
-    default 64000000 if MACH_STM32G0
+    default 64000000 if MACH_STM32G0 && MACH_STM32G0_FREQ_64
+    default 96000000 if MACH_STM32G0 && MACH_STM32G0_FREQ_96
     default 170000000 if MACH_STM32G431
     default 170000000 if MACH_STM32G474
     default 520000000 if MACH_STM32H723
