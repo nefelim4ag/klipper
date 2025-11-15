@@ -476,6 +476,7 @@ class PrinterEddyProbe:
         self.printer.add_object('probe', self)
         name = config.get_name()
         cname = name.split()[-1]
+        self.query_mean_z = .0
         gcode = self.printer.lookup_object('gcode')
         gcode.register_mux_command("PROBE_EDDY_QUERY", "CHIP",
                                    cname, self.cmd_PROBE_EDDY_QUERY,
@@ -487,7 +488,9 @@ class PrinterEddyProbe:
     def get_offsets(self):
         return self.probe_offsets.get_offsets()
     def get_status(self, eventtime):
-        return self.cmd_helper.get_status(eventtime)
+        status = self.cmd_helper.get_status(eventtime)
+        status['query_z'] = self.query_mean_z
+        return status
     def start_probe_session(self, gcmd):
         method = gcmd.get('METHOD', 'automatic').lower()
         if method in ('scan', 'rapid_scan'):
@@ -526,6 +529,7 @@ class PrinterEddyProbe:
         deltas = [ (i - mean) ** 2 for i in s_Z]
         stddev = math.sqrt(sum(deltas) / len(deltas))
         gcmd.respond_info("Z heigh mean=%.3f stddev=%.3f" % (mean, stddev))
+        self.query_mean_z = mean
 class DummyDriftCompensation:
     def get_temperature(self):
         return 0.
