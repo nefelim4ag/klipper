@@ -276,9 +276,19 @@ class EddyCalibration:
     def register_drift_compensation(self, comp):
         self.drift_comp = comp
 
+def central_diff(times, values):
+    velocity = [0.0] * len(values)
+    for i in range(1, len(values) - 1):
+        delta_v = (values[i+1] - values[i-1])
+        delta_t = (times[i+1] - times[i-1])
+        velocity[i] = delta_v / delta_t
+    velocity[0] = (values[1] - values[0]) / (times[1] - times[0])
+    velocity[-1] = (values[-1] - values[-2]) / (times[-1] - times[-2])
+    return velocity
+
 # Tool to gather samples and convert them to probe positions
 class EddyGatherSamples:
-    def __init__(self, printer, sensor_helper, calibration, offsets):
+    def __init__(self, printer, sensor_helper, calibration, design, offsets):
         self._printer = printer
         self._sensor_helper = sensor_helper
         # Sensor reading and probe request tracking
@@ -289,6 +299,7 @@ class EddyGatherSamples:
         self._analysis_results = []
         # Data analysis
         self._calibration = calibration
+        self._design = design
         self._offsets = offsets
         if not self._calibration.is_calibrated():
             raise self._printer.command_error(
@@ -374,6 +385,39 @@ class EddyGatherSamples:
         del self._analysis_results[:]
         return results
     # Measurement and position analysis helpers
+    def validate_samples_time(self, timestamps):
+        cycle_time = 1.0 / self._design.sample_frequency
+        SYNC_SLACK = 0.001
+        for i in range(1, len(timestamps)):
+            tdiff = timestamps[i] - timestamps[i-1]
+            if cycle_time + SYNC_SLACK < tdiff:
+                logging.error("LDC1612: Gaps in the data: %.3f < %.3f" % (
+                    (cycle_time + SYNC_SLACK, tdiff)
+                ))
+                break
+            if cycle_time - SYNC_SLACK > tdiff:
+                logging.error(
+                    "LDC1612: CLKIN frequency too low: %.3f > %.3f" % (
+                        (cycle_time - SYNC_SLACK, tdiff)
+                    ))
+                break
+    def _pull_tap_time(self, measures):
+        tap_time = []
+        tap_value = []
+        for time, freq, z in measures:
+            tap_time.append(time)
+            tap_value.append(freq)
+        # If samples have gaps this will not produce adequate data
+        self.validate_samples_time(tap_time)
+        # Do the same filtering as on the MCU but without induced lag
+        try:
+            fvals = self._design.filtfilt(tap_value)
+        except ValueError as e:
+            raise self._printer.command_error(str(e))
+        velocity = central_diff(tap_time, fvals)
+        peak_velocity = max(velocity)
+        i = velocity.index(peak_velocity)
+        return tap_time[i]
     def _lookup_toolhead_pos(self, pos_time):
         toolhead = self._printer.lookup_object('toolhead')
         kin = toolhead.get_kinematics()
@@ -415,12 +459,12 @@ class EddyGatherSamples:
         self._add_probe_request(self._analyze_scan, start_time, end_time,
                                 pos_time)
     # Handle "tap" probe request
-    def _analyze_tap(self, measures, start_time, end_time, trig_pos):
-        # XXX - for now just use trigger position (this is not very accurate)
-        return self._create_probe_result(0., trig_pos)
-    def note_tap_probe(self, start_time, end_time, trig_pos):
-        self._add_probe_request(self._analyze_tap, start_time, end_time,
-                                trig_pos)
+    def _analyze_tap(self, measures, start_time, end_time):
+        pos_time = self._pull_tap_time(measures)
+        toolhead_pos = self._lookup_toolhead_pos(pos_time)
+        return self._create_probe_result(0., toolhead_pos)
+    def note_tap_probe(self, start_time, end_time):
+        self._add_probe_request(self._analyze_tap, start_time, end_time)
 
 MAX_VALID_RAW_VALUE=0x03ffffff
 
@@ -480,29 +524,37 @@ class EddyDescend:
     def start_probe_session(self, gcmd):
         is_tap = gcmd is not None and gcmd.get('METHOD', '').lower() == 'tap'
         self._is_tap = is_tap
+        design = None
         if is_tap:
             self._prep_trigger_analog_tap()
+            design = self._design.get_main_filter()
             offsets = (0., 0., 0.)
         else:
             self._prep_trigger_analog_descend()
             offsets = self._probe_offsets.get_offsets(gcmd)
         self._gather = EddyGatherSamples(self._printer, self._sensor_helper,
-                                         self._calibration, offsets)
+                                         self._calibration, design, offsets)
         return self
     def run_probe(self, gcmd):
         toolhead = self._printer.lookup_object('toolhead')
         pos = toolhead.get_position()
         pos[2] = self._z_min_position
         speed = self._param_helper.get_probe_params(gcmd)['probe_speed']
+        move_start_time = None
+        if self._is_tap:
+            move_start_time = toolhead.get_last_move_time()
         # Perform probing move
         phoming = self._printer.lookup_object('homing')
         trig_pos = phoming.probing_move(self._trigger_analog, pos, speed)
         # Extract samples
         if self._is_tap:
             trigger_time = self._trigger_analog.get_last_trigger_time()
-            start_time = trigger_time - 0.025
-            end_time = trigger_time + 0.025
-            self._gather.note_tap_probe(start_time, end_time, trig_pos)
+            start_time = trigger_time - 0.250
+            # Filter short move
+            if start_time < move_start_time:
+                start_time = move_start_time
+            end_time = trigger_time
+            self._gather.note_tap_probe(start_time, end_time)
         else:
             start_time = self._trigger_analog.get_last_trigger_time() + 0.050
             end_time = start_time + 0.100
@@ -559,7 +611,7 @@ class EddyScanningProbe:
         self._calibration = calibration
         offsets = probe_offsets.get_offsets()
         self._gather = EddyGatherSamples(printer, sensor_helper,
-                                         calibration, offsets)
+                                         calibration, None, offsets)
         self._sample_time_delay = 0.050
         self._sample_time = gcmd.get_float("SAMPLE_TIME", 0.100, above=0.0)
         self._is_rapid = gcmd.get("METHOD", "scan") == 'rapid_scan'
