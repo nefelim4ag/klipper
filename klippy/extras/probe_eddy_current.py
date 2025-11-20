@@ -508,9 +508,10 @@ class EddyDescend:
         speed = self._param_helper.get_probe_params(gcmd)['probe_speed']
         pos = toolhead.get_position()
         # Duct tape
-        if pos[2] < 2.:
-            pos[2] = 5
+        if pos[2] < self._z_offset:
+            pos[2] = self._z_offset + 1
             toolhead.move(pos, speed)
+        toolhead.dwell(0.05)
         pos[2] = self._z_min_position
         # Perform probing move
         phoming = self._printer.lookup_object('homing')

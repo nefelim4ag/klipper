@@ -88,6 +88,8 @@ class HomingMove:
                                    for s in es.get_steppers() ]
         # Start endstop checking
         print_time = self.toolhead.get_last_move_time()
+        self.toolhead.dwell(HOMING_START_DELAY + 0.2)
+        print_time += 0.2
         endstop_triggers = []
         for mcu_endstop, name in self.endstops:
             rest_time = self._calc_endstop_rate(mcu_endstop, movepos, speed)
