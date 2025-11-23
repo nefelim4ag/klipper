@@ -477,6 +477,7 @@ class EddyDescend:
         self._trigger_time = 0.
         self._gather = None
         self._is_tap = 0
+        self._get_offsets = probe.ProbeOffsetsHelper(config).get_offsets
         probe.LookupZSteppers(config, self._dispatch.add_stepper)
     # Interface for phoming.probing_move()
     def get_steppers(self):
@@ -528,6 +529,10 @@ class EddyDescend:
                                              self._sensor_helper,
                                              self._calibration, self._z_offset)
         return self
+    def get_offsets(self):
+        if self._is_tap:
+            return .0, .0, .0
+        return self._get_offsets()
     def run_probe(self, gcmd):
         toolhead = self._printer.lookup_object('toolhead')
         pos = toolhead.get_position()

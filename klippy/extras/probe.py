@@ -346,6 +346,12 @@ class ProbeSessionHelper:
         self.hw_probe_session = self.start_session_cb(gcmd)
         self.results = []
         return self
+    def get_offsets(self):
+        # Allow probe to overload its own offsets
+        if getattr(self.hw_probe_session, 'get_offsets', None):
+            return self.hw_probe_session.get_offsets()
+        pprobe = self.printer.lookup_object("probe")
+        return pprobe.get_offsets()
     def end_probe_session(self):
         hw_probe_session = self.hw_probe_session
         if hw_probe_session is None:
@@ -497,6 +503,9 @@ class ProbePointsHelper:
             raise gcmd.error("horizontal_move_z can't be less than"
                              " probe's z_offset")
         probe_session = probe.start_probe_session(gcmd)
+        # Allow probe to overload its own offsets
+        if getattr(probe_session, 'get_offsets', None):
+            self.probe_offsets = probe_session.get_offsets()
         probe_num = 0
         while 1:
             self._raise_tool(not probe_num)
