@@ -118,6 +118,8 @@ check_home(struct ldc1612 *ld, uint32_t data)
     uint8_t homing_flags = ld->homing_flags;
     if (!(homing_flags & LH_CAN_TRIGGER))
         return;
+    // Ignore amplitude errors
+    data &= ~(1 << 28);
     if (data > 0x0fffffff) {
         // Sensor reports an issue - cancel homing
         ld->homing_flags = 0;
