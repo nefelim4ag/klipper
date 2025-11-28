@@ -17,6 +17,42 @@ except:
 # Graphing
 ######################################################################
 
+def add_vertical_cursor(fig, axes, times):
+    # Create one vline per axes
+    vlines = []
+    texts = []
+
+    for ax in axes:
+        vline = ax.axvline(x=times[0], color='k', lw=0.8, alpha=0.6)
+        vlines.append(vline)
+
+        # Text object in upper-right corner of each subplot
+        txt = ax.text(
+            0.98, 0.9, "", transform=ax.transAxes,
+            ha='right', va='top', fontsize='small',
+            bbox=dict(facecolor='white', alpha=0.6, edgecolor='none')
+        )
+        texts.append(txt)
+
+    def on_move(event):
+        if not event.inaxes:
+            return
+        x = event.xdata
+        for vline in vlines:
+            vline.set_xdata([x, x])
+        for ax, txt in zip(axes, texts):
+            line = ax.lines[0]
+            xd = line.get_xdata()
+            yd = line.get_ydata()
+            # Find nearest datapoint
+            idx = (abs(xd - x)).argmin()
+            text = "t: %.6fs\ny: %.3f" % (x, yd[idx])
+            txt.set_text(text)
+
+        fig.canvas.draw_idle()
+
+    fig.canvas.mpl_connect("motion_notify_event", on_move)
+
 def plot_motion(amanager, graphs, log_prefix):
     # Generate data
     for graph in graphs:
@@ -61,6 +97,7 @@ def plot_motion(amanager, graphs, log_prefix):
             graph_ax.legend(loc='best', prop=fontP)
         graph_ax.grid(True)
     rows[-1].set_xlabel('Time (s)')
+    add_vertical_cursor(fig, rows, times)
     return fig
 
 
