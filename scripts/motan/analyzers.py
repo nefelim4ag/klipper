@@ -16,13 +16,19 @@ AHandlers = {}
 
 # Calculate a derivative (position to velocity, or velocity to accel)
 class GenDerivative:
-    ParametersMin = ParametersMax = 1
+    ParametersMin = 1
+    ParametersMax = 2
     DataSets = [
         ('derivative(<dataset>)', 'Derivative of the given dataset'),
+        ('derivative(<dataset>,central)',
+         'Central Derivative of the given dataset'),
     ]
     def __init__(self, amanager, name_parts):
         self.amanager = amanager
         self.source = name_parts[1]
+        self.central = False
+        if len(name_parts) > 2:
+            self.central = True
         amanager.setup_dataset(self.source)
     def get_label(self):
         label = self.amanager.get_label(self.source)
@@ -42,6 +48,14 @@ class GenDerivative:
     def generate_data(self):
         inv_seg_time = 1. / self.amanager.get_segment_time()
         data = self.amanager.get_datasets()[self.source]
+        if self.central:
+            print('lol')
+            deriv = [.0] * len(data)
+            for i in range(1, len(data) - 1):
+                deriv[i] = (data[i+1] - data[i-1]) * (inv_seg_time/2)
+            deriv[0] = (data[1] - data[0]) * inv_seg_time
+            deriv[-1] = (data[-1] - data[-2]) * inv_seg_time
+            return deriv
         deriv = [(data[i+1] - data[i]) * inv_seg_time
                  for i in range(len(data)-1)]
         return [deriv[0]] + deriv
