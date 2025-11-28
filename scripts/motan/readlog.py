@@ -510,17 +510,23 @@ class HandleEddyCurrent:
     ParametersMax = 2
     DataSets = [
         ('ldc1612(<name>)', 'Coil resonant frequency'),
+        ('ldc1612(<name>,raw', 'Raw sensor data'),
         ('ldc1612(<name>,period)', 'Coil resonant period'),
         ('ldc1612(<name>,z)', 'Estimated Z height'),
     ]
     def __init__(self, lmanager, name, name_parts):
         self.name = name
         self.sensor_name = name_parts[1]
-        if len(name_parts) == 3 and name_parts[2] not in ("period", "z"):
+        if len(name_parts) == 3 and name_parts[2] not in ("period", "z", 'raw'):
             raise error("Unknown ldc1612 selection '%s'" % (name_parts[2],))
         self.report_frequency = len(name_parts) == 2
         self.report_z = len(name_parts) == 3 and name_parts[2] == "z"
+        self.report_raw = len(name_parts) == 3 and name_parts[2] == "raw"
         self.jdispatch = lmanager.get_jdispatch()
+        if self.report_raw:
+            config = lmanager.get_initial_status()['configfile']['settings']
+            sconfig = config["probe_eddy_current %s" % (self.sensor_name)]
+            self.frequency = sconfig["frequency"]
         self.next_samp = self.prev_samp = [0., 0., 0.]
         self.cur_data = []
         self.data_pos = 0
@@ -531,6 +537,9 @@ class HandleEddyCurrent:
         if self.report_z:
             label = '%s height' % (self.sensor_name,)
             return {'label': label, 'units': 'Position\n(mm)'}
+        if self.report_raw:
+            label = '%s raw' % (self.sensor_name,)
+            return {'label': label, 'units': 'Count'}
         label = '%s period' % (self.sensor_name,)
         return {'label': label, 'units': 'Period\n(s)'}
     def pull_data(self, req_time):
@@ -544,6 +553,9 @@ class HandleEddyCurrent:
                 elif self.report_z:
                     next_val = next_z
                     prev_val = prev_z
+                elif self.report_raw:
+                    next_val = next_freq / (self.frequency / (1 << 28))
+                    prev_val = prev_freq / (self.frequency / (1 << 28))
                 else:
                     next_val = 1. / next_freq
                     prev_val = 1. / prev_freq
