@@ -21,8 +21,11 @@ LDC1612_MANUF_ID = 0x5449
 LDC1612_DEV_ID = 0x3055
 
 REG_RCOUNT0 = 0x08
+REG_RCOUNT1 = 0x09
 REG_OFFSET0 = 0x0c
+REG_OFFSET1 = 0x0d
 REG_SETTLECOUNT0 = 0x10
+REG_SETTLECOUNT1 = 0x11
 REG_CLOCK_DIVIDERS0 = 0x14
 REG_ERROR_CONFIG = 0x19
 REG_CONFIG = 0x1a
@@ -142,11 +145,13 @@ class LDC1612Tap:
 
 # Interface class to LDC1612 mcu support
 class LDC1612:
+    FREF_DIV = 1
     def __init__(self, config, calibration=None):
         self.printer = config.get_printer()
         self.calibration = calibration
         self.dccal = DriveCurrentCalibrate(config, self)
         self.data_rate = config.getint("data_rate", minval=50, default=250)
+        self.mva_odr = self.data_rate
         # Setup mcu sensor_ldc1612 bulk query code
         self.i2c = bus.MCU_I2C_from_config(config,
                                            default_addr=LDC1612_ADDR,
@@ -156,7 +161,8 @@ class LDC1612:
         self.query_ldc1612_cmd = None
         self.ldc1612_setup_home_cmd = self.query_ldc1612_home_state_cmd = None
         self.frequency = config.getint("frequency", DEFAULT_LDC1612_FREQ,
-                                       2000000, 40000000)
+                                       2000000, 50000000)
+        self.internal_clk = self.frequency > 40000000
         if config.get('intb_pin', None) is not None:
             ppins = config.get_printer().lookup_object("pins")
             pin_params = ppins.lookup_pin(config.get('intb_pin'))
@@ -225,8 +231,28 @@ class LDC1612:
         return self.mcu.clock_to_print_time(tclock)
     # Measurement decoding
     def _convert_samples(self, samples):
-        freq_conv = float(self.frequency) / (1<<28)
+        freq_conv = float(self.frequency) / (1<<28) / self.FREF_DIV
         count = 0
+        if len(samples) > 10: # synchronization
+            tsum = .0
+            for i in range(len(samples) - 1):
+                tdiff = samples[i+1][0] - samples[i][0]
+                tsum += tdiff
+            avg_odr = 1 / (tsum / (len(samples) - 1))
+            self.mva_odr = self.mva_odr * 0.99 + avg_odr * 0.01
+            data_rate = self.data_rate
+            if (self.mva_odr > data_rate * 1.001 or
+                    self.mva_odr < data_rate * 0.999):
+                corr_coef = ((self.mva_odr / self.data_rate) + 63.0) / 64
+                old_freq = self.frequency
+                self.frequency = self.frequency * corr_coef
+                logging.info("Sync freq: %.1f -> %1.f" % (
+                    old_freq, self.frequency))
+                rcount0 = self.frequency / (16. * self.data_rate)
+                self.set_reg(REG_RCOUNT0, int(rcount0 + 0.5))
+                self.set_reg(REG_OFFSET0, 0)
+                self.set_reg(REG_SETTLECOUNT0,
+                             int(SETTLETIME*self.frequency/16. + .5))
         for ptime, val in samples:
             mv = val & 0x0fffffff
             if mv != val:
@@ -256,15 +282,24 @@ class LDC1612:
                 "This is generally indicative of connection problems\n"
                 "(e.g. faulty wiring) or a faulty ldc1612 chip."
                 % (manuf_id, dev_id, LDC1612_MANUF_ID, LDC1612_DEV_ID))
+        frequency = self.frequency
+        if self.frequency > 35000000:
+            # Enable dummy channel
+            # self.set_reg(REG_RCOUNT1, 5)
+            # self.set_reg(REG_OFFSET1, 0)
+            # self.set_reg(REG_SETTLECOUNT1, 1)
+            self.FREF_DIV = 2
+            frequency /= 2
+
         # Setup chip in requested query rate
         rcount0 = self.frequency / (16. * self.data_rate)
         self.set_reg(REG_RCOUNT0, int(rcount0 + 0.5))
         self.set_reg(REG_OFFSET0, 0)
         self.set_reg(REG_SETTLECOUNT0, int(SETTLETIME*self.frequency/16. + .5))
-        self.set_reg(REG_CLOCK_DIVIDERS0, (1 << 12) | 1)
+        self.set_reg(REG_CLOCK_DIVIDERS0, (1 << 12) | self.FREF_DIV)
         self.set_reg(REG_ERROR_CONFIG, (0x1f << 11) | 1)
         self.set_reg(REG_MUX_CONFIG, 0x0208 | DEGLITCH)
-        REF_CLK_SRC = 1 << 9
+        REF_CLK_SRC = (not self.internal_clk) << 9
         AUTO_AMP_DIS = 1 << 10
         RP_OVERRIDE_EN = 1 << 12
         CFG = 0x001 # constant
