@@ -1308,6 +1308,13 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#tap-calibration" class="md-nav__link">
+    Tap calibration
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#thermal-drift-calibration" class="md-nav__link">
     Thermal Drift Calibration
   </a>
@@ -1385,6 +1392,13 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#tap-calibration" class="md-nav__link">
+    Tap calibration
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#thermal-drift-calibration" class="md-nav__link">
     Thermal Drift Calibration
   </a>
@@ -1456,6 +1470,56 @@ result in changes in reported Z height. Changes in either the bed
 surface temperature or sensor hardware temperature can skew the
 results. It is important that calibration and probing is only done
 when the printer is at a stable temperature.</p>
+<h2 id="tap-calibration">Tap calibration<a class="headerlink" href="#tap-calibration" title="Permanent link">&para;</a></h2>
+<p>The Eddy probe measures the resonance frequency of the coil.
+By the absolute value of the frequency and the calibration curve from
+<code>PROBE_EDDY_CURRENT_CALIBRATE</code>, it is therefore possible to detect
+where the bed is without physical contact.</p>
+<p>By use of the same knowledge, we know that frequency changes with
+the distance. It is possible to track that change in real time and
+detect the time/position where contact happens - a change of frequency
+starts to change in a different way.
+For example, stopped to change because of the collision.</p>
+<p>Because eddy output is not perfect: there is sensor noise,
+mechanical oscillation, thermal expansion and other discrepancies,
+it is required to calibrate the stop threshold for your machine.
+Practically, it ensures that the Eddy's output data absolute value
+change per second (velocity) is high enough - higher than the noise level,
+and that upon collision it always decreases by at least this value.</p>
+<div class="highlight"><pre><span></span><code>[probe_eddy_current my_probe]
+# eddy probe configuration...
+tap_max_deceleration: -1
+</code></pre></div>
+
+<p>Suggested calibration routine works as follows:</p>
+<ol>
+<li>Home Z</li>
+<li>Place toolhead at the center of the bed.</li>
+<li>Move Z far away, 30mm for example.</li>
+<li>Run <code>PROBE METHOD=tap</code></li>
+<li>If it stops before collision, adjust the <code>tap_max_deceleration</code>.</li>
+</ol>
+<p>Repeat until nozzle would softly touch the bed.
+It easier to do so with clean nozzle and by visual inspection of the process.</p>
+<p>Example calibration values:
+<code>-1 -&gt; -100 -&gt; -200 -&gt; -400 -&gt; -800 -&gt; -1200 -&gt; -1600 -&gt; -2000</code></p>
+<p>Your value will normally be between those.
+Too high value leaves less safe space,
+if something is between the nozzle and the bed or if the nozzle
+is too close to the bed before tap.
+Too low, on the other hand, can make the toolhead stop in mid-air
+because of the noise.</p>
+<p>You can validate the tap precision by measuring the paper thickness
+from the initial calibration guide. It is expected to be ~0.1mm.</p>
+<p>Tap precision is limited by the sampling frequency and
+the speed of the descent.
+If you take 24 photos per second of the moving train, you can only estimate
+where the train was between photos.</p>
+<p>It is possible to reduce the descending speed. It may require decrease of
+absolute <code>tap_max_deceleration</code> value.</p>
+<p>It is possible to tap over non-conductive surfaces as long as there is metal
+behind it within the sensor's sensitivity range.
+Max distance can be approximated to be about 1.5x of the coil's narrowest part.</p>
 <h2 id="thermal-drift-calibration">Thermal Drift Calibration<a class="headerlink" href="#thermal-drift-calibration" title="Permanent link">&para;</a></h2>
 <p>As with all inductive probes, eddy current probes are subject to
 significant thermal drift.  If the eddy probe has a temperature
