@@ -94,6 +94,13 @@ fifo_configure(void)
     fpos += ep_size;
 }
 
+// Storage for "bulk in" transmissions for
+// a kind of manual "double buffering"
+static struct {
+    uint32_t len;
+    uint8_t buf[USB_CDC_EP_BULK_IN_SIZE];
+} TX_BUF;
+
 // Write a packet to a tx fifo
 static int_fast8_t
 fifo_write_packet(uint32_t ep, const uint8_t *src, uint32_t len)
@@ -208,6 +215,28 @@ usb_read_bulk_out(void *data, uint_fast8_t max_len)
     return ret;
 }
 
+static void
+buf_bulk_in_drain(void)
+{
+    // Guard FIFO call inside interrupt
+    uint32_t ctl = EPIN(USB_CDC_EP_BULK_IN)->DIEPCTL;
+    if (ctl & USB_OTG_DIEPCTL_EPENA) {
+        OTGD->DAINTMSK |= 1 << USB_CDC_EP_BULK_IN;
+        return;
+    }
+    fifo_write_packet(USB_CDC_EP_BULK_IN, TX_BUF.buf, TX_BUF.len);
+    TX_BUF.len = 0;
+}
+
+static int_fast8_t
+buf_bulk_in(void *data, uint_fast8_t len) {
+    if (TX_BUF.len)
+        return -1;
+    memcpy(TX_BUF.buf, data, len);
+    TX_BUF.len = len;
+    return len;
+}
+
 int_fast8_t
 usb_send_bulk_in(void *data, uint_fast8_t len)
 {
@@ -218,13 +247,22 @@ usb_send_bulk_in(void *data, uint_fast8_t len)
         usb_irq_enable();
         return len;
     }
+    int_fast8_t ret;
     if (ctl & USB_OTG_DIEPCTL_EPENA) {
         // Wait for space to transmit
         OTGD->DAINTMSK |= 1 << USB_CDC_EP_BULK_IN;
-        usb_irq_enable();
-        return -1;
+        ret = buf_bulk_in(data, len);
+        goto out;
     }
-    int_fast8_t ret = fifo_write_packet(USB_CDC_EP_BULK_IN, data, len);
+    if (!TX_BUF.len) {
+        // Fast path, no double buffering
+        ret = fifo_write_packet(USB_CDC_EP_BULK_IN, data, len);
+    } else {
+        buf_bulk_in_drain();
+        ret = buf_bulk_in(data, len);
+        OTGD->DAINTMSK |= 1 << USB_CDC_EP_BULK_IN;
+    }
+out:
     usb_irq_enable();
     return ret;
 }
@@ -373,6 +411,7 @@ usb_set_configure(void)
                     | USB_OTG_GRSTCTL_TXFFLSH);
     while (OTG->GRSTCTL & USB_OTG_GRSTCTL_TXFFLSH)
         ;
+    TX_BUF.len = 0;
     usb_irq_enable();
 }
 
@@ -401,8 +440,11 @@ OTG_FS_IRQHandler(void)
         OTGD->DAINTMSK = msk & ~daint;
         if (pend & (1 << 0))
             usb_notify_ep0();
-        if (pend & (1 << USB_CDC_EP_BULK_IN))
+        if (pend & (1 << USB_CDC_EP_BULK_IN)) {
             usb_notify_bulk_in();
+            if (TX_BUF.len)
+                buf_bulk_in_drain();
+        }
     }
 }
 
