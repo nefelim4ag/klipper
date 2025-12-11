@@ -80,6 +80,9 @@ console_sendf(const struct command_encoder *ce, va_list args)
     // Start message transmit
     transmit_pos = tpos + msglen;
     usb_notify_bulk_in();
+    // Fast response
+    if (!tpos)
+        usb_bulk_in_task();
 }
 
 
