@@ -79,6 +79,9 @@ canserial_tx_task(void)
 DECL_TASK(canserial_tx_task);
 
 // Encode and transmit a "response" message
+// transmit_buf: [......|XXXXXXXXXX|............]
+//               ^      ^          ^            ^
+//               0   tpos       tmax  sizeof(buf)
 void
 console_sendf(const struct command_encoder *ce, va_list args)
 {
@@ -105,6 +108,9 @@ console_sendf(const struct command_encoder *ce, va_list args)
     // Start message transmit
     CanData.transmit_max = tmax + msglen;
     canserial_notify_tx();
+    // Fast response
+    if (!tpos)
+        canserial_tx_task();
 }
 
 
