@@ -28,6 +28,10 @@ DECL_CONSTANT("CANBUS_BRIDGE", 1);
 #define USB_GSUSB_1_VENDOR_ID      0x1d50
 #define USB_GSUSB_1_PRODUCT_ID     0x606f
 
+#define GS_CAN_MODE_FD (1 << 8)
+#define GS_CAN_FEATURE_FD (1 << 8)
+#define GS_CAN_FLAG_FD (1 << 1)
+
 enum gs_usb_breq {
     GS_USB_BREQ_HOST_FORMAT = 0,
     GS_USB_BREQ_BITTIMING,
@@ -97,6 +101,21 @@ struct gs_host_frame {
     };
 } __packed;
 
+struct gs_host_fd_frame {
+    uint32_t echo_id;
+    uint32_t can_id;
+
+    uint8_t can_dlc;
+    uint8_t channel;
+    uint8_t flags;
+    uint8_t reserved;
+
+    union {
+        uint8_t data[48];
+        uint32_t data32[12];
+    };
+} __packed;
+
 
 /****************************************************************
  * Main usbcan task (read requests from usb and send msgs to usb)
@@ -122,6 +141,13 @@ static struct usbcan_data {
     // Data from physical canbus interface
     uint32_t canhw_pull_pos, canhw_push_pos;
     struct canbus_msg canhw_queue[32];
+
+    // CANFD message pack/unpack
+    uint8_t canfd_encoder;
+    // Data to host
+    struct task_wake wake_fd_tx;
+    uint8_t fd_len;
+    struct gs_host_fd_frame fd_tx;
 } UsbCan;
 
 enum {
@@ -134,17 +160,92 @@ enum {
     HS_TX_LOCAL = 4,
 };
 
+static uint8_t
+dlc_decode(uint8_t dlc) {
+    if (dlc <= 8)  return dlc;
+    if (dlc <= 12) return 8 + (dlc - 8) * 4;
+    if (dlc == 13) return 32;
+    if (dlc == 14) return 48;
+    return 64;
+}
+
+static uint8_t
+dlc_encode(uint8_t len) {
+    if (48 <= len) return 14;
+    if (32 <= len) return 13;
+    if (24 <= len) return 12;
+    if (20 <= len) return 11;
+    if (16 <= len) return 10;
+    if (12 <= len) return 9;
+    if (8 <= len)  return 8;
+    return len;
+}
+
+void
+canfd_tx_task(void)
+{
+    if (!sched_check_wake(&UsbCan.wake_fd_tx))
+        return;
+    if (!UsbCan.canfd_encoder)
+        return;
+    if (!UsbCan.fd_len)
+        return;
+    struct gs_host_fd_frame *gs =  &UsbCan.fd_tx;
+    gs->can_dlc = dlc_encode(UsbCan.fd_len);
+    uint32_t tx_bytes = dlc_decode(gs->can_dlc);
+    uint32_t header = sizeof(*gs) - sizeof(gs->data);
+    uint32_t len = header + tx_bytes;
+    int ret = usb_send_bulk_in(gs, len);
+    if (ret < 0)
+        return;
+    UsbCan.fd_len -= tx_bytes;
+    if (UsbCan.fd_len > 0) {
+        memmove(&gs->data[0], &gs->data[tx_bytes], UsbCan.fd_len);
+        sched_wake_task(&UsbCan.wake_fd_tx);
+    }
+}
+DECL_TASK(canfd_tx_task);
+
+static void
+wake_canfd_tx_task(void) {
+    sched_wake_task(&UsbCan.wake_fd_tx);
+}
+
+static int
+pack_fd_data(struct canbus_msg *msg) {
+    struct gs_host_fd_frame *gs =  &UsbCan.fd_tx;
+    if (UsbCan.fd_len == 0) {
+        gs->echo_id = 0xffffffff;
+        gs->flags = GS_CAN_FLAG_FD;
+        gs->can_id = msg->id;
+    }
+    if (gs->can_id != msg->id)
+        goto busy;
+    if (UsbCan.fd_len + 8 > sizeof(gs->data))
+        goto busy;
+    memcpy(&gs->data[UsbCan.fd_len], msg->data, msg->dlc);
+    UsbCan.fd_len += msg->dlc;
+    wake_canfd_tx_task();
+    return msg->dlc;
+busy:
+    wake_canfd_tx_task();
+    return -1;
+}
+
 // Send a message to the Linux host
 static int
 send_frame(struct canbus_msg *msg)
 {
+    if (UsbCan.canfd_encoder)
+        return pack_fd_data(msg);
     struct gs_host_frame gs = {};
     gs.echo_id = 0xffffffff;
     gs.can_id = msg->id;
     gs.can_dlc = msg->dlc;
     gs.data32[0] = msg->data32[0];
     gs.data32[1] = msg->data32[1];
-    return usb_send_bulk_in(&gs, sizeof(gs));
+    uint32_t len = sizeof(gs) - sizeof(gs.data) + dlc_decode(msg->dlc);
+    return usb_send_bulk_in(&gs, len);
 }
 
 // Send any pending messages read from canbus hw to host
@@ -185,6 +286,8 @@ drain_usb_host_messages(void)
         if (ret <= 0)
             // No more messages ready
             break;
+        if (gs->flags & GS_CAN_FLAG_FD)
+            UsbCan.canfd_encoder = 1;
         UsbCan.host_push_pos = push_pos = push_pos + 1;
     }
 }
@@ -264,7 +367,8 @@ drain_host_queue(void)
             if (UsbCan.notify_local || UsbCan.usb_send_busy)
                 // Don't send echo frame until other traffic is sent
                 break;
-            int ret = usb_send_bulk_in(gs, sizeof(*gs));
+            int len = sizeof(*gs) - sizeof(gs->data) + dlc_decode(gs->can_dlc);
+            int ret = usb_send_bulk_in(gs, len);
             if (ret < 0)
                 break;
             UsbCan.host_status = host_status = host_status & ~HS_TX_ECHO;
@@ -393,6 +497,7 @@ void
 usb_notify_bulk_in(void)
 {
     wake_usbcan_task();
+    wake_canfd_tx_task();
 }
 
 
@@ -689,7 +794,7 @@ gs_breq_device_config(struct usb_ctrlrequest *req)
 
 static const struct gs_device_bt_const bt_const PROGMEM = {
     // These are just dummy values for now
-    .feature = 0,
+    .feature = 0 | GS_CAN_FEATURE_FD,
     .fclk_can = 48000000,
     .tseg1_min = 1,
     .tseg1_max = 16,
@@ -716,6 +821,14 @@ gs_breq_bittiming(struct usb_ctrlrequest *req)
     usb_do_xfer(&device_bittiming, sizeof(device_bittiming), UX_READ);
 }
 
+static void
+gs_breq_data_bittiming(struct usb_ctrlrequest *req)
+{
+    // Bit timing is ignored for now
+    usb_do_xfer(&device_bittiming, sizeof(device_bittiming), UX_READ);
+}
+
+
 struct gs_device_mode device_mode;
 
 static void
@@ -723,6 +836,7 @@ gs_breq_mode(struct usb_ctrlrequest *req)
 {
     // Mode is ignored for now
     usb_do_xfer(&device_mode, sizeof(device_mode), UX_READ);
+    UsbCan.canfd_encoder = 1;
 }
 
 static void
@@ -747,6 +861,7 @@ usb_state_ready(void)
         case GS_USB_BREQ_BT_CONST: gs_breq_bt_const(&req); break;
         case GS_USB_BREQ_BITTIMING: gs_breq_bittiming(&req); break;
         case GS_USB_BREQ_MODE: gs_breq_mode(&req); break;
+        case GS_USB_BREQ_DATA_BITTIMING: gs_breq_data_bittiming(&req); break;
         default: usb_do_stall(); break;
         }
     } else {

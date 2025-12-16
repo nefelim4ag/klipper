@@ -12,7 +12,9 @@
 // clock times, prioritizes commands, and handles retransmissions.  A
 // background thread is launched to do this work and minimize latency.
 
-#include <linux/can.h> // // struct can_frame
+#include <linux/can.h> // struct can_frame
+#include <linux/can/raw.h> // CAN_RAW_FD_FRAMES
+#include <sys/socket.h> // setsockopt
 #include <math.h> // fabs
 #include <pthread.h> // pthread_mutex_lock
 #include <stddef.h> // offsetof
@@ -328,7 +330,7 @@ static void
 input_event(struct serialqueue *sq, double eventtime)
 {
     if (sq->serial_fd_type == SQT_CAN) {
-        struct can_frame cf;
+        struct canfd_frame cf;
         int ret = read(sq->serial_fd, &cf, sizeof(cf));
         if (ret <= 0) {
             report_errno("can read", ret);
@@ -337,8 +339,8 @@ input_event(struct serialqueue *sq, double eventtime)
         }
         if (cf.can_id != sq->client_id + 1)
             return;
-        memcpy(&sq->input_buf[sq->input_pos], cf.data, cf.can_dlc);
-        sq->input_pos += cf.can_dlc;
+        memcpy(&sq->input_buf[sq->input_pos], cf.data, cf.len);
+        sq->input_pos += cf.len;
     } else {
         int ret = read(sq->serial_fd, &sq->input_buf[sq->input_pos]
                        , sizeof(sq->input_buf) - sq->input_pos);
@@ -399,7 +401,7 @@ do_write(struct serialqueue *sq, void *buf, int buflen)
     while (buflen) {
         int size = buflen > 8 ? 8 : buflen;
         cf.can_id = sq->client_id;
-        cf.can_dlc = size;
+        cf.len = size;
         memcpy(cf.data, buf, size);
         int ret = write(sq->serial_fd, &cf, sizeof(cf));
         if (ret < 0) {
@@ -719,6 +721,14 @@ serialqueue_alloc(int serial_fd, char serial_fd_type, int client_id
     int ret = pipe(sq->transmit_requests.pipe_fds);
     if (ret)
         goto fail;
+
+    if (sq->serial_fd_type == SQT_CAN) {
+        int enable = 1;
+        ret = setsockopt(sq->serial_fd, SOL_CAN_RAW, CAN_RAW_FD_FRAMES,
+                   &enable, sizeof(enable));
+        if (ret < 0)
+            report_errno("setsockopt", ret);
+    }
 
     // Reactor setup
     sq->pr = pollreactor_alloc(SQPF_NUM, SQPT_NUM, sq);

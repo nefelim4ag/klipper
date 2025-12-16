@@ -142,6 +142,7 @@ class SerialReader:
             try:
                 bus = can.interface.Bus(channel=canbus_iface,
                                         can_filters=filters,
+                                        fd=True,
                                         bustype='socketcan')
                 bus.send(set_id_msg)
             except (can.CanError, os.error, IOError) as e:
