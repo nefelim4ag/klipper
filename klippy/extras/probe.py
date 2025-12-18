@@ -80,6 +80,9 @@ class ProbeCommandHelper:
         pos = run_single_probe(self.probe, gcmd)
         gcmd.respond_info("Result is z=%.6f" % (pos[2],))
         self.last_z_result = pos[2]
+        params = self.probe.get_probe_params(gcmd)
+        liftpos = [None, None, pos[2] + params['sample_retract_dist']]
+        self._move(liftpos, params['lift_speed'])
     def probe_calibrate_finalize(self, kin_pos):
         if kin_pos is None:
             return
