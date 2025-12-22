@@ -434,11 +434,6 @@ class EddyDescend:
         self._trigger_time = 0.
         trigger_completion = self._dispatch.start(print_time)
         if self._is_tap:
-            # TODO: move it somewhere in the upper stack
-            # Give the SOS filter time to stabilize
-            toolhead = self._printer.lookup_object('toolhead')
-            toolhead.dwell(0.025)
-            print_time = toolhead.get_last_move_time()
             self._sensor_helper.setup_home_tap(
                 print_time, self._dispatch.get_oid(),
                 mcu.MCU_trsync.REASON_ENDSTOP_HIT, self.REASON_SENSOR_ERROR)
@@ -480,6 +475,9 @@ class EddyDescend:
         pos[2] = self._z_min_position
         speed = self._param_helper.get_probe_params(gcmd)['probe_speed']
         # Perform probing move
+        if self._is_tap:
+            # Give the SOS filter time to stabilize
+            toolhead.dwell(0.035)
         phoming = self._printer.lookup_object('homing')
         trig_pos = phoming.probing_move(self, pos, speed)
         if not self._trigger_time:
