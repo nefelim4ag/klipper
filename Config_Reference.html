@@ -7307,11 +7307,10 @@ pin:
 <p>Static configurable output pin (one may define any number of
 sections with an "static_pwm_clock" prefix).
 Pins configured here will be set up as clock output pins.
-Maybe used to provide clock input to other hardware on the board.</p>
+Generally used to provide clock input to other hardware on the board.</p>
 <div class="highlight"><pre><span></span><code>[static_pwm_clock my_pin]
 pin:
-#   The pin to configure as an output. This parameter must be
-#   provided.
+#   The pin to configure as an output. This parameter must be provided.
 #frequency: 100
 #   Target output frequency.
 </code></pre></div>
