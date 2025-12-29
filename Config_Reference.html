@@ -1402,8 +1402,8 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#gpio_clock_output" class="md-nav__link">
-    [gpio_clock_output]
+  <a href="#static_pwm_clock" class="md-nav__link">
+    [static_pwm_clock]
   </a>
   
 </li>
@@ -3566,8 +3566,8 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#gpio_clock_output" class="md-nav__link">
-    [gpio_clock_output]
+  <a href="#static_pwm_clock" class="md-nav__link">
+    [static_pwm_clock]
   </a>
   
 </li>
@@ -7303,22 +7303,17 @@ pin:
 #   These options are deprecated and should no longer be specified.
 </code></pre></div>
 
-<h3 id="gpio_clock_output">[gpio_clock_output]<a class="headerlink" href="#gpio_clock_output" title="Permanent link">&para;</a></h3>
+<h3 id="static_pwm_clock">[static_pwm_clock]<a class="headerlink" href="#static_pwm_clock" title="Permanent link">&para;</a></h3>
 <p>Static configurable output pin (one may define any number of
-sections with an "gpio_clock_output" prefix).
+sections with an "static_pwm_clock" prefix).
 Pins configured here will be set up as clock output pins.
 Maybe used to provide clock input to other hardware on the board.</p>
-<div class="highlight"><pre><span></span><code>[gpio_clock_output my_pin]
+<div class="highlight"><pre><span></span><code>[static_pwm_clock my_pin]
 pin:
 #   The pin to configure as an output. This parameter must be
 #   provided.
-#pulse_width: 0.5
-#   The value to set the pin to during MCU configuration.
-#   The default is 0.5.
-#frequency: 1000
+#frequency: 100
 #   Target output frequency.
-#scale:
-#   See the &quot;output_pin&quot; section for the definition of these parameters.
 </code></pre></div>
 
 <h3 id="pwm_tool">[pwm_tool]<a class="headerlink" href="#pwm_tool" title="Permanent link">&para;</a></h3>
