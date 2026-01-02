@@ -87,8 +87,14 @@ class LDC1612:
         self.oid = mcu.create_oid()
         self.query_ldc1612_cmd = None
         self.ldc1612_setup_home_cmd = self.query_ldc1612_home_state_cmd = None
-        self.frequency = config.getint("frequency", DEFAULT_LDC1612_FREQ,
-                                       2000000, 40000000)
+        self.clock_freq = config.getint("frequency", DEFAULT_LDC1612_FREQ,
+                                        2000000, 40000000)
+        # Coil frequency divider
+        self.sensor_div  = 1
+        # Always assume that 12MHz is BTT Eddy
+        if self.clock_freq == DEFAULT_LDC1612_FREQ:
+            self.sensor_div  = 2
+        self.freq_conv = float(self.clock_freq * self.sensor_div) / (1<<28)
         intb_pin = config.get('intb_pin', None)
         pin_params = {}
         if intb_pin is not None:
@@ -161,11 +167,10 @@ class LDC1612:
             "ldc1612_home_state oid=%c homing=%c trigger_clock=%u",
             oid=self.oid, cq=cmdqueue)
     def _coil_freq2raw_fixed_point(self, coil_freq):
-        freq2raw = 1 / (self.frequency / (1 << 28))
         # If there will be the ability to set the filter state
         # right before tap to actual value
         # It is done this way
-        raw_value = coil_freq * freq2raw
+        raw_value = coil_freq / self.freq_conv
         fixed_point_raw_value = raw_value / (1 << self._qfrac_bits)
         return fixed_point_raw_value
     def get_mcu(self):
@@ -183,7 +188,7 @@ class LDC1612:
     def setup_home(self, print_time, trigger_freq,
                    trsync_oid, hit_reason, err_reason):
         clock = self.mcu.print_time_to_clock(print_time)
-        tfreq = int(trigger_freq * (1<<28) / float(self.frequency) + 0.5)
+        tfreq = int(trigger_freq / float(self.freq_conv) + 0.5)
         if tfreq >= 0x0fffffff:
             self.printer.command_error("Trigger frequency is too high")
         self.ldc1612_setup_home_cmd.send(
@@ -199,6 +204,7 @@ class LDC1612:
         if not self.tap_threshold:
             raise self.printer.command_error("tap_threshold is zero")
         clock = self.mcu.print_time_to_clock(print_time)
+        self.tap_threshold /= self.sensor_div
         threshold = -1 * self.tap_threshold
         self.ldc1612_setup_home_cmd.send(
             [self.oid, clock, threshold, trsync_oid, hit_reason, err_reason])
@@ -227,7 +233,7 @@ class LDC1612:
                 break
     # Measurement decoding
     def _convert_samples(self, samples):
-        freq_conv = float(self.frequency) / (1<<28)
+        freq_conv = self.freq_conv
         count = 0
         errors = {}
         def log_once(msg, warning=False):
@@ -272,11 +278,11 @@ class LDC1612:
                 "(e.g. faulty wiring) or a faulty ldc1612 chip."
                 % (manuf_id, dev_id, LDC1612_MANUF_ID, LDC1612_DEV_ID))
         # Setup chip in requested query rate
-        rcount0 = self.frequency / (16. * self.data_rate)
+        rcount0 = self.clock_freq / (16. * self.data_rate)
         self.set_reg(REG_RCOUNT0, int(rcount0 + 0.5))
         self.set_reg(REG_OFFSET0, 0)
-        self.set_reg(REG_SETTLECOUNT0, int(SETTLETIME*self.frequency/16. + .5))
-        self.set_reg(REG_CLOCK_DIVIDERS0, (1 << 12) | 1)
+        self.set_reg(REG_SETTLECOUNT0, int(SETTLETIME*self.clock_freq/16. + .5))
+        self.set_reg(REG_CLOCK_DIVIDERS0, (self.sensor_div << 12) | 1)
         self.set_reg(REG_ERROR_CONFIG, (0x1f << 11) | 1)
         self.set_reg(REG_MUX_CONFIG, 0x0208 | DEGLITCH)
         self.set_reg(REG_CONFIG, 0x001 | (1<<12) | (1<<10) | (1<<9))
