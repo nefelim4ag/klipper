@@ -90,7 +90,7 @@ class LDC1612:
         self.clock_freq = config.getint("frequency", DEFAULT_LDC1612_FREQ,
                                         2000000, 40000000)
         # Coil frequency divider
-        self.sensor_div  = 1
+        self.sensor_div  = 2
         # Always assume that 12MHz is BTT Eddy
         if self.clock_freq == DEFAULT_LDC1612_FREQ:
             self.sensor_div  = 2
