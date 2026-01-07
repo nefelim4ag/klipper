@@ -1629,35 +1629,24 @@ and time consuming than most other procedures.  It may require practice and seve
 <li>Try software I2C/decrease I2C rate</li>
 </ul>
 </li>
-<li>Eddy watchdog timeout<ul>
-<li>Frequency misconfiguration</li>
-<li>No reference clock signal</li>
+<li>Frequency over valid hard range<ul>
+<li>Check frequency configuration</li>
 <li>Hardware fault</li>
 </ul>
 </li>
-<li>Eddy current sensor error<ul>
-<li>Check logs for sensor-specific errors</li>
-</ul>
-</li>
-</ul>
-<p>Possible sensor errors in the log:</p>
-<ul>
-<li>I2C IO error - same as above.</li>
-<li>Frequency over valid range<ul>
-<li>Frequency misconfiguration</li>
-<li>Hardware fault</li>
+<li>Frequency over valid soft range<ul>
+<li>Check frequency configuration</li>
 </ul>
 </li>
 <li>Conversion Watchdog timeout<ul>
 <li>Hardware fault</li>
 </ul>
 </li>
-<li>Amplitude Low/High</li>
 </ul>
 <p>Amplitude Low/High messages can mean:</p>
 <ul>
 <li>Sensor close to the bed</li>
-<li>Sensor too far from the bed</li>
+<li>Sensor far from the bed</li>
 <li>Higher temperature than was at the current calibration</li>
 <li>Capacitor missing</li>
 </ul>
