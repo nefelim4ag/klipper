@@ -234,11 +234,11 @@ class TMCStallguardDump:
         self.fields = self.mcu_tmc.get_fields()
         self.sg2_supp = False
         self.sg4_reg_name = None
-        # It is possible to support TMC2660, just disable it for now
+        self.tmc2660 = False
         if not self.fields.all_fields.get("DRV_STATUS", None):
-            return
+            self.tmc2660 = True
         # Collect driver capabilities
-        if self.fields.all_fields["DRV_STATUS"].get("sg_result", None):
+        if self.fields.all_fields.get("DRV_STATUS",{}).get("sg_result", None):
             self.sg2_supp = True
         # New drivers have separate register for SG4 result
         if self.mcu_tmc.name_to_reg.get("SG_RESULT", 0):
@@ -262,7 +262,9 @@ class TMCStallguardDump:
                                          self.stepper_name, api_resp)
     def _start(self):
         self.error = None
-        status = self.mcu_tmc.get_register_raw("DRV_STATUS")
+        status = {}
+        if not self.tmc2660:
+            status = self.mcu_tmc.get_register_raw("DRV_STATUS")
         if status.get("spi_status"):
             self.optimized_spi = True
         reactor = self.printer.get_reactor()
@@ -289,12 +291,18 @@ class TMCStallguardDump:
                     sg4_ret = self.mcu_tmc.get_register_raw("SG4_RESULT")
                     sg_result = sg4_ret["data"]
                     recv_time = sg4_ret["#receive_time"]
-            else:
-                # TMC2209
-                if self.sg4_reg_name == "SG_RESULT":
-                    sg4_ret = self.mcu_tmc.get_register_raw("SG_RESULT")
-                    sg_result = sg4_ret["data"]
-                    recv_time = sg4_ret["#receive_time"]
+            elif self.sg4_reg_name == "SG_RESULT":
+                sg4_ret = self.mcu_tmc.get_register_raw("SG_RESULT")
+                sg_result = sg4_ret["data"]
+                recv_time = sg4_ret["#receive_time"]
+            elif self.tmc2660:
+                sg2_ret = self.mcu_tmc.get_register_raw("READRSP@RDSEL2")
+                reg_val = sg2_ret["data"]
+                cs_actual = self.fields.get_field("se", reg_val)
+                sg2_ret = self.mcu_tmc.get_register_raw("READRSP@RDSEL1")
+                reg_val = sg2_ret["data"]
+                sg_result = self.fields.get_field("sg_result", reg_val)
+                recv_time = sg2_ret["#receive_time"]
         except self.printer.command_error as e:
             self.error = e
             return self.printer.get_reactor().NEVER
