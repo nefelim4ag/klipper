@@ -1,0 +1,2 @@
+CONFIG probe_eddy_current.cfg
+DICTIONARY atmega2560.dict
