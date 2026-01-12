@@ -1526,24 +1526,31 @@ tap_threshold: 0
 </ol>
 <p>Repeat until nozzle would softly touch the bed.
 It easier to do so with clean nozzle and by visual inspection of the process.</p>
-<p>Example calibration values:
-<code>1 -&gt; 100 -&gt; 200 -&gt; 400 -&gt; 800 -&gt; 1200 -&gt; 1600 -&gt; 2000</code></p>
-<p>Your value will normally be between those.
-Too high value leaves less safe space,
-if something is between the nozzle and the bed or if the nozzle
-is too close to the bed before tap.
-Too low, on the other hand, can make the toolhead stop in mid-air
-because of the noise.</p>
+<p>Example sequence of threshold values to test:</p>
+<div class="highlight"><pre><span></span><code>1 -&gt; 100 -&gt; 200 -&gt; 400 -&gt; 800 -&gt; 1200 -&gt; 1600 -&gt; 2000
+2000 -&gt; 1800 -&gt; 1750
+</code></pre></div>
+
+<p>Your value will normally be between those.</p>
+<ul>
+<li>Too high a value leaves a less safe margin for early collision -
+if something is between the nozzle and the bed, or if the nozzle
+is too close to the bed before the tap.</li>
+<li>Too low - can make the toolhead stop in mid-air
+because of the noise.</li>
+</ul>
 <p>You can estimate the initial threshold value by analyzing your own
 calibration routine output:</p>
 <div class="highlight"><pre><span></span><code>probe_eddy_current: noise 0.000642mm, MAD_Hz=11.314
+...
+z_offset: 1.010 # noise 0.000400mm, MAD_Hz=14.000
 </code></pre></div>
 
 <p>By use of your reference frequency from the
 <a href="Config_Reference.html#probe_eddy_current">configuration</a>.
 The estimation will be:</p>
-<div class="highlight"><pre><span></span><code>MAD_Hz * (1&lt;&lt;28) / Reference_frequency
-11.314 * 268435456 / 12000000 = 253
+<div class="highlight"><pre><span></span><code>MAD_Hz * 2 * (1&lt;&lt;28) / Reference_frequency
+11.314 * 2 * 268435456 / 12000000 = 506
 </code></pre></div>
 
 <p>You can validate the tap precision by measuring the paper thickness
