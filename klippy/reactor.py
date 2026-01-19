@@ -9,15 +9,19 @@ import chelper, util
 
 _NOW = 0.
 _NEVER = 9999999999999999.
+_UNPAUSE_NAME = "__unpause"
 
 class ReactorError(Exception):
     pass
 
 class ReactorTimer:
-    def __init__(self, callback, waketime):
+    def __init__(self, callback, waketime, whoami=None):
         self.callback = callback
         self.waketime = waketime
         self.timer_is_running = False
+        self.whoami = whoami
+        if whoami is None:
+            self.whoami = util.get_python_function_owner(callback)
 
 class ReactorCompletion:
     class sentinel: pass
@@ -44,7 +48,8 @@ class ReactorCompletion:
 class ReactorCallback:
     def __init__(self, reactor, callback, waketime):
         self.reactor = reactor
-        self.timer = reactor.register_timer(self.invoke, waketime)
+        whoami = util.get_python_function_owner(callback)
+        self.timer = reactor.register_timer(self.invoke, waketime, whoami)
         self.callback = callback
         self.completion = ReactorCompletion(reactor)
     def invoke(self, eventtime):
@@ -56,13 +61,45 @@ class ReactorCallback:
 class ReactorFileHandler:
     def __init__(self, fd, read_callback, write_callback):
         self.fd = fd
+        self.read_whoami = util.get_python_function_owner(read_callback)
         self.read_callback = read_callback
+        self.write_whoami = util.get_python_function_owner(write_callback)
         self.write_callback = write_callback
 
 class ReactorGreenlet(greenlet.greenlet):
     def __init__(self, run):
         greenlet.greenlet.__init__(self, run=run)
         self.timer = None
+        # Time tracking
+        self.frame = None
+    def note_start_time(self, frame, eventtime, uniq_id, whoami):
+        # Borrow remote reference
+        self.frame = frame
+        self.frame.eventtime = eventtime
+        self.frame.duration = time.perf_counter()
+        self.frame.accum = .0
+        self.frame.id = uniq_id
+        self.frame.whoami = whoami
+        self.frame.state = "running"
+    def note_pause_time(self, waketime, next_frame):
+        self.frame.state = "paused"
+        self.frame.duration = time.perf_counter() - self.frame.duration
+        next_frame.id = self.frame.id
+        next_frame.eventtime = waketime
+        next_frame.accum += self.frame.accum + self.frame.duration
+        next_frame.whoami = self.frame.whoami
+        next_frame.state = "scheduled"
+        self.frame = next_frame
+    def unpause(self, waketime):
+        self.frame.eventtime = waketime
+        self.frame.duration = time.perf_counter()
+        self.frame.state = "running"
+        return self.switch(waketime)
+    def note_end_time(self):
+        self.frame.duration = time.perf_counter() - self.frame.duration
+        self.frame.state = "finished"
+        # Free remote reference
+        self.frame = None
 
 class ReactorMutex:
     def __init__(self, reactor, is_locked):
@@ -101,6 +138,64 @@ class ReactorPreventPause:
     def __exit__(self, type=None, value=None, tb=None):
         self.reactor._prevent_pause_count -= 1
 
+class HistoryFrame:
+    __slots__ = ["eventtime", "id", "duration", "accum", "whoami", "state"]
+    def __init__(self):
+        self.eventtime = -1
+        self.id = 0
+        self.duration = 0
+        self.accum = 0
+        self.whoami = ""
+        self.state = ""
+
+class ReactorTimersHistory:
+    def __init__(self, size):
+        self._size = size
+        self._history = [HistoryFrame() for _ in range(size)]
+        self._next_free = 0
+        self._greenlet_count = 0
+    def get_free_frame(self):
+        while self._history[self._next_free % self._size].state == "scheduled":
+            self._next_free += 1
+        frame = self._history[self._next_free % self._size]
+        self._next_free += 1
+        return frame
+    def note_new_greenlet(self):
+        self._greenlet_count += 1
+        if self._greenlet_count + 1 >= self._size:
+            self.inflate()
+    def inflate(self, growth=10):
+        old_history = self._history
+        self._history = []
+        index = self._next_free - self._size
+        for i in range(index, self._next_free):
+            j = i % len(old_history)
+            frame = old_history[j]
+            self._history.append(frame)
+        self._next_free = self._size
+        self._size += growth
+        self._history.extend(HistoryFrame() for i in range(growth))
+    def dump_debug(self):
+        out = ["Dumping last %d executed timers" % self._size]
+        history = sorted(self._history, key=lambda f: f.eventtime)
+        ids = ["%x" % f.id for f in history if f.eventtime > 0]
+        prefix = os.path.commonprefix(ids)
+        trim_len = len(prefix)
+        for i, f in enumerate(history):
+            if f.eventtime < 0:
+                continue
+            uniq_id = "%x" % f.id
+            short_id = uniq_id[trim_len:]
+            duration = f.duration
+            accum = f.accum
+            if f.state == "running":
+                duration = time.perf_counter() - duration
+                accum += duration
+            line = "%3.d: %.6f %.6f %+.6f %s %s %s" % (
+                i, f.eventtime, accum, duration, short_id, f.whoami, f.state)
+            out.append(line)
+        return '\n'.join(out)
+
 class SelectReactor:
     NOW = _NOW
     NEVER = _NEVER
@@ -113,6 +208,7 @@ class SelectReactor:
         self._last_gc_times = [0., 0., 0.]
         # Timers
         self._timers = []
+        self._history = ReactorTimersHistory(100)
         self._next_timer = self.NEVER
         # Callbacks
         self._pipe_fds = None
@@ -149,13 +245,15 @@ class SelectReactor:
         gc.collect(gc_level)
         return True
     # Timers
+    def dump_debug(self):
+        return self._history.dump_debug()
     def update_timer(self, timer_handler, waketime):
         if timer_handler.timer_is_running:
             return
         timer_handler.waketime = waketime
         self._next_timer = min(self._next_timer, waketime)
-    def register_timer(self, callback, waketime=NEVER):
-        timer_handler = ReactorTimer(callback, waketime)
+    def register_timer(self, callback, waketime=NEVER, whoami=None):
+        timer_handler = ReactorTimer(callback, waketime, whoami)
         timers = list(self._timers)
         timers.append(timer_handler)
         self._timers = timers
@@ -180,9 +278,15 @@ class SelectReactor:
             waketime = t.waketime
             if eventtime >= waketime:
                 t.waketime = self.NEVER
+                if t.whoami != _UNPAUSE_NAME:
+                    frame = self._history.get_free_frame()
+                    g_dispatch.note_start_time(frame, eventtime,
+                                               id(t), t.whoami)
                 t.timer_is_running = True
                 t.waketime = waketime = t.callback(eventtime)
                 t.timer_is_running = False
+                if t.whoami != _UNPAUSE_NAME:
+                    g_dispatch.note_end_time()
                 if g_dispatch is not self._g_dispatch:
                     self._next_timer = min(self._next_timer, waketime)
                     self._end_greenlet(g_dispatch)
@@ -240,12 +344,13 @@ class SelectReactor:
             self.verify_can_pause()
         # Determine if this greenlet is the main dispatch greenlet
         g = greenlet.getcurrent()
+        g.note_pause_time(waketime, self._history.get_free_frame())
         if g is not self._g_dispatch:
             # This greenlet has called pause() before and has a timer setup,
             # so switch to _check_timers (via g.timer.callback return)
             return self._g_dispatch.switch(waketime)
         # Pausing the dispatch greenlet - setup timer to resume this greenlet
-        g.timer = self.register_timer(g.switch, waketime)
+        g.timer = self.register_timer(g.unpause, waketime, _UNPAUSE_NAME)
         self._next_timer = self.NOW
         if self._cached_dispatch_greenlets:
             # Switch to _end_greenlet to activate cached dispatch greenlet
@@ -306,12 +411,20 @@ class SelectReactor:
         for fd, event in hdls:
             hdl = self._fds.get(fd, self._dummy_fd_hdl)
             if event & self._READ:
+                frame = self._history.get_free_frame()
+                g_dispatch.note_start_time(frame, eventtime,
+                                           id(hdl), hdl.read_whoami)
                 hdl.read_callback(eventtime)
+                g_dispatch.note_end_time()
                 if g_dispatch is not self._g_dispatch:
                     self._end_greenlet(g_dispatch)
                     return self.monotonic()
             if event & self._WRITE:
+                frame = self._history.get_free_frame()
+                g_dispatch.note_start_time(frame, eventtime,
+                                           id(hdl), hdl.write_whoami)
                 hdl.write_callback(eventtime)
+                g_dispatch.note_end_time()
                 if g_dispatch is not self._g_dispatch:
                     self._end_greenlet(g_dispatch)
                     return self.monotonic()
@@ -338,6 +451,7 @@ class SelectReactor:
                 # Create new greenlet to dispatch timers and events
                 g_next = ReactorGreenlet(run=self._dispatch_loop)
                 self._all_greenlets.append(g_next)
+                self._history.note_new_greenlet()
                 self._g_dispatch = g_next
                 g_next.switch()
                 # Control returns here on end() request or switch from pause()
