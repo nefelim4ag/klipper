@@ -414,6 +414,13 @@ class EddyGatherSamples:
     def note_scan_probe(self, start_time, end_time, pos_time):
         self._add_probe_request(self._analyze_scan, start_time, end_time,
                                 pos_time)
+    # Handle "tap" probe request
+    def _analyze_tap(self, measures, start_time, end_time, trig_pos):
+        # XXX - for now just use trigger position (this is not very accurate)
+        return self._create_probe_result(0., trig_pos)
+    def note_tap_probe(self, start_time, end_time, trig_pos):
+        self._add_probe_request(self._analyze_tap, start_time, end_time,
+                                trig_pos)
 
 MAX_VALID_RAW_VALUE=0x03ffffff
 
@@ -430,9 +437,40 @@ class EddyDescend:
         self._trigger_analog = trigger_analog.MCU_trigger_analog(sensor_helper)
         self._z_min_position = probe.lookup_minimum_z(config)
         self._gather = None
+        self._is_tap = False
+        self._design = None
+        self._tap_threshold_dhz = config.getfloat('tap_threshold_dhz', 0,
+                                                 minval=.0)
+        if self._tap_threshold_dhz:
+            self._setup_tap()
         dispatch = self._trigger_analog.get_dispatch()
         probe.LookupZSteppers(config, dispatch.add_stepper)
-    def _prep_trigger_analog(self):
+    def _setup_tap(self):
+        # Create sos filter "design"
+        cfg_error = self._printer.config_error
+        sps = self._sensor_helper.get_samples_per_second()
+        design = trigger_analog.DigitalFilter(sps, cfg_error,
+                                              lowpass=25.0, lowpass_order=4)
+        # Create the derivative (sample to sample difference) post filter
+        self._design = trigger_analog.DerivativeFilter(design)
+        # Create SOS filter
+        cmd_queue = self._trigger_analog.get_dispatch().get_command_queue()
+        sos_filter = trigger_analog.MCU_SosFilter(self._mcu, cmd_queue, 5)
+        self._trigger_analog.setup_sos_filter(sos_filter)
+    def _prep_trigger_analog_tap(self):
+        if not self._tap_threshold_dhz:
+            raise self._printer.command_error("Tap not configured")
+        sos_filter = self._trigger_analog.get_sos_filter()
+        sos_filter.set_filter_design(self._design)
+        sos_filter.set_offset_scale(0, 1., auto_offset=True)
+        self._trigger_analog.set_raw_range(0, MAX_VALID_RAW_VALUE)
+        convert_frequency = self._sensor_helper.convert_frequency
+        raw_threshold = convert_frequency(self._tap_threshold_dhz)
+        self._trigger_analog.set_trigger('diff_peak_gt', raw_threshold)
+    def _prep_trigger_analog_descend(self):
+        sos_filter = self._trigger_analog.get_sos_filter()
+        sos_filter.set_filter_design(None)
+        sos_filter.set_offset_scale(0, 1.)
         self._trigger_analog.set_raw_range(0, MAX_VALID_RAW_VALUE)
         z_offset = self._probe_offsets.get_offsets()[2]
         trigger_freq = self._calibration.height_to_freq(z_offset)
@@ -440,8 +478,14 @@ class EddyDescend:
         self._trigger_analog.set_trigger('gt', conv_freq)
     # Probe session interface
     def start_probe_session(self, gcmd):
-        self._prep_trigger_analog()
-        offsets = self._probe_offsets.get_offsets()
+        is_tap = gcmd is not None and gcmd.get('METHOD', '').lower() == 'tap'
+        self._is_tap = is_tap
+        if is_tap:
+            self._prep_trigger_analog_tap()
+            offsets = (0., 0., 0.)
+        else:
+            self._prep_trigger_analog_descend()
+            offsets = self._probe_offsets.get_offsets(gcmd)
         self._gather = EddyGatherSamples(self._printer, self._sensor_helper,
                                          self._calibration, offsets)
         return self
@@ -454,10 +498,16 @@ class EddyDescend:
         phoming = self._printer.lookup_object('homing')
         trig_pos = phoming.probing_move(self._trigger_analog, pos, speed)
         # Extract samples
-        start_time = self._trigger_analog.get_last_trigger_time() + 0.050
-        end_time = start_time + 0.100
-        toolhead_pos = toolhead.get_position()
-        self._gather.note_descend_probe(start_time, end_time, toolhead_pos)
+        if self._is_tap:
+            trigger_time = self._trigger_analog.get_last_trigger_time()
+            start_time = trigger_time - 0.025
+            end_time = trigger_time + 0.025
+            self._gather.note_tap_probe(start_time, end_time, trig_pos)
+        else:
+            start_time = self._trigger_analog.get_last_trigger_time() + 0.050
+            end_time = start_time + 0.100
+            toolhead_pos = toolhead.get_position()
+            self._gather.note_descend_probe(start_time, end_time, toolhead_pos)
     def pull_probed_results(self):
         return self._gather.pull_probed()
     def end_probe_session(self):
@@ -569,6 +619,8 @@ class PrinterEddyProbe:
     def get_probe_params(self, gcmd=None):
         return self.param_helper.get_probe_params(gcmd)
     def get_offsets(self, gcmd=None):
+        if gcmd is not None and gcmd.get('METHOD', '').lower() == "tap":
+            return (0., 0., 0.)
         return self.probe_offsets.get_offsets(gcmd)
     def get_status(self, eventtime):
         return self.cmd_helper.get_status(eventtime)
