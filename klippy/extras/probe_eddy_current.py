@@ -327,15 +327,14 @@ class EddyGatherSamples:
                 # In debugging mode
                 if pos_time is not None:
                     toolhead_pos = self._lookup_toolhead_pos(pos_time)
-                self._probe_results.append((toolhead_pos[2], toolhead_pos))
+                self._probe_results.append((toolhead_pos[2], toolhead_pos,
+                                            None))
                 self._probe_times.pop(0)
                 continue
             reactor.pause(systime + 0.010)
-    def _pull_freq(self, start_time, end_time):
-        # Find average sensor frequency between time range
+    def _pull_measurements(self, start_time, end_time):
         msg_num = discard_msgs = 0
-        samp_sum = 0.
-        samp_count = 0
+        measures = []
         while msg_num < len(self._samples):
             msg = self._samples[msg_num]
             msg_num += 1
@@ -345,15 +344,29 @@ class EddyGatherSamples:
             if data[-1][0] < start_time:
                 discard_msgs = msg_num
                 continue
-            for time, freq, z in data:
+            for sample in data:
+                time = sample[0]
                 if time >= start_time and time <= end_time:
-                    samp_sum += freq
-                    samp_count += 1
+                    measures.append(sample)
         del self._samples[:discard_msgs]
-        if not samp_count:
-            # No sensor readings - raise error in pull_probed()
-            return 0.
-        return samp_sum / samp_count
+        if not len(measures):
+            raise self._printer.command_error(
+                "Unable to obtain probe_eddy_current sensor readings"
+            )
+        return measures
+    def _measures_to_z(self, measures):
+        # Find average sensor frequency between time range
+        samp_sum = 0.
+        samp_count = 0
+        for time, freq, z in measures:
+            samp_sum += freq
+            samp_count += 1
+        avg_freq = samp_sum / samp_count
+        sensor_z = self._calibration.freq_to_height(avg_freq)
+        if sensor_z <= -OUT_OF_RANGE or sensor_z >= OUT_OF_RANGE:
+            raise self._printer.command_error(
+                "probe_eddy_current sensor not in valid range")
+        return sensor_z
     def _lookup_toolhead_pos(self, pos_time):
         toolhead = self._printer.lookup_object('toolhead')
         kin = toolhead.get_kinematics()
@@ -366,24 +379,21 @@ class EddyGatherSamples:
             start_time, end_time, pos_time, toolhead_pos = self._probe_times[0]
             if self._samples[-1]['data'][-1][0] < end_time:
                 break
-            freq = self._pull_freq(start_time, end_time)
-            if pos_time is not None:
-                toolhead_pos = self._lookup_toolhead_pos(pos_time)
+            error = None
             sensor_z = None
-            if freq:
-                sensor_z = self._calibration.freq_to_height(freq)
-            self._probe_results.append((sensor_z, toolhead_pos))
+            try:
+                measures = self._pull_measurements(start_time, end_time)
+                sensor_z = self._measures_to_z(measures)
+            except self._printer.command_error as e:
+                error = e
+            self._probe_results.append((sensor_z, toolhead_pos, error))
             self._probe_times.pop(0)
     def pull_probed(self):
         self._await_samples()
         results = []
-        for sensor_z, toolhead_pos in self._probe_results:
-            if sensor_z is None:
-                raise self._printer.command_error(
-                    "Unable to obtain probe_eddy_current sensor readings")
-            if sensor_z <= -OUT_OF_RANGE or sensor_z >= OUT_OF_RANGE:
-                raise self._printer.command_error(
-                    "probe_eddy_current sensor not in valid range")
+        for sensor_z, toolhead_pos, error in self._probe_results:
+            if error:
+                raise error
             res = manual_probe.ProbeResult(
                 toolhead_pos[0]+self._offsets[0],
                 toolhead_pos[1]+self._offsets[1], toolhead_pos[2]-sensor_z,
@@ -391,11 +401,13 @@ class EddyGatherSamples:
             results.append(res)
         del self._probe_results[:]
         return results
-    def note_probe(self, start_time, end_time, toolhead_pos):
+    def note_descend_probe(self, start_time, end_time, toolhead_pos):
         self._probe_times.append((start_time, end_time, None, toolhead_pos))
         self._check_samples()
-    def note_probe_and_position(self, start_time, end_time, pos_time):
-        self._probe_times.append((start_time, end_time, pos_time, None))
+    def note_scan_probe(self, start_time, end_time, pos_time):
+        toolhead_pos = self._lookup_toolhead_pos(pos_time)
+        self._probe_times.append((start_time, end_time, pos_time,
+                                  toolhead_pos))
         self._check_samples()
 
 MAX_VALID_RAW_VALUE=0x03ffffff
@@ -435,12 +447,12 @@ class EddyDescend:
         speed = self._param_helper.get_probe_params(gcmd)['probe_speed']
         # Perform probing move
         phoming = self._printer.lookup_object('homing')
-        trig_pos = phoming.probing_move(self._trigger_analog, pos, speed)
+        phoming.probing_move(self._trigger_analog, pos, speed)
         # Extract samples
         start_time = self._trigger_analog.get_last_trigger_time() + 0.050
         end_time = start_time + 0.100
         toolhead_pos = toolhead.get_position()
-        self._gather.note_probe(start_time, end_time, toolhead_pos)
+        self._gather.note_descend_probe(start_time, end_time, toolhead_pos)
     def pull_probed_results(self):
         return self._gather.pull_probed()
     def end_probe_session(self):
@@ -498,7 +510,7 @@ class EddyScanningProbe:
         self._is_rapid = gcmd.get("METHOD", "scan") == 'rapid_scan'
     def _rapid_lookahead_cb(self, printtime):
         start_time = printtime - self._sample_time / 2
-        self._gather.note_probe_and_position(
+        self._gather.note_scan_probe(
             start_time, start_time + self._sample_time, printtime)
     def run_probe(self, gcmd):
         toolhead = self._printer.lookup_object("toolhead")
@@ -508,7 +520,7 @@ class EddyScanningProbe:
         printtime = toolhead.get_last_move_time()
         toolhead.dwell(self._sample_time_delay + self._sample_time)
         start_time = printtime + self._sample_time_delay
-        self._gather.note_probe_and_position(
+        self._gather.note_scan_probe(
             start_time, start_time + self._sample_time, start_time)
     def pull_probed_results(self):
         if self._is_rapid:
