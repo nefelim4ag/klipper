@@ -329,6 +329,7 @@ class LoadCellProbingMove:
         Q17_14_FRAC_BITS = 14
         sos_filter.set_offset_scale(int(-tare_counts), gpc,
                                     Q17_14_FRAC_BITS, Q16_15_FRAC_BITS)
+        sos_filter.set_start_state(1.0) # XXX - unclear why this is set to 1.0
 
     # Probe towards z_min until the trigger_analog on the MCU triggers
     def probing_move(self, gcmd):
