@@ -1526,6 +1526,13 @@ tap_threshold: 0
 </ol>
 <p>Repeat until nozzle would softly touch the bed.
 It easier to do so with clean nozzle and by visual inspection of the process.</p>
+<p>You can streamline the process by placing the toolhead at the center once.
+And upon config restart, trick the machine into thinking that Z is homed.</p>
+<div class="highlight"><pre><span></span><code>SET_KINEMATIC_POSITION Z=0
+G0 Z5
+PROBE METHOD=tap
+</code></pre></div>
+
 <p>Example sequence of threshold values to test:</p>
 <div class="highlight"><pre><span></span><code>1 -&gt; 100 -&gt; 200 -&gt; 400 -&gt; 800 -&gt; 1200 -&gt; 1600 -&gt; 2000
 2000 -&gt; 1800 -&gt; 1750
