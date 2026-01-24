@@ -461,7 +461,7 @@ class EddyDescend:
         sos_filter = self._trigger_analog.get_sos_filter()
         sos_filter.set_filter_design(self._design)
         self._trigger_analog.set_raw_range(0, MAX_VALID_RAW_VALUE)
-        def_coil_freq = 3000000.
+        def_coil_freq = 3000000
         conv_value = self._sensor_helper.convert_frequency(def_coil_freq)
         sos_filter.set_start_state(conv_value)
         self._trigger_analog.set_trigger('diff_peak_gt', self._tap_threshold)
@@ -493,6 +493,20 @@ class EddyDescend:
         pos[2] = self._z_min_position
         speed = self._param_helper.get_probe_params(gcmd)['probe_speed']
         # Perform probing move
+        toolhead.dwell(0.001)
+        pt = toolhead.get_last_move_time()
+        sos_filter = self._trigger_analog.get_sos_filter()
+        logging.info(self._gather._samples)
+        while len(self._gather._samples) == 0:
+            now = self._printer.get_reactor().monotonic()
+            self._printer.get_reactor().pause(now + 0.1)
+        while self._gather._samples[-1]["data"][-1][0] < pt:
+            now = self._printer.get_reactor().monotonic()
+            self._printer.get_reactor().pause(now + 0.025)
+        def_coil_freq = self._gather._samples[-1]["data"][-1][1]
+        logging.info(def_coil_freq)
+        conv_value = self._sensor_helper.convert_frequency(def_coil_freq)
+        sos_filter.set_start_state(conv_value)
         phoming = self._printer.lookup_object('homing')
         phoming.probing_move(self._trigger_analog, pos, speed)
         # Extract samples
