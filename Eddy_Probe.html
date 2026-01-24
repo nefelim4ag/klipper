@@ -1513,7 +1513,7 @@ change per second (velocity) is high enough - higher than the noise level,
 and that upon collision it always decreases by at least this value.</p>
 <div class="highlight"><pre><span></span><code>[probe_eddy_current my_probe]
 # eddy probe configuration...
-tap_hz_threshold: 0
+tap_threshold_dhz: 0
 </code></pre></div>
 
 <p>Suggested calibration routine works as follows:</p>
@@ -1522,13 +1522,13 @@ tap_hz_threshold: 0
 <li>Place toolhead at the center of the bed.</li>
 <li>Move Z far away, 30mm for example.</li>
 <li>Run <code>PROBE METHOD=tap</code></li>
-<li>If it stops before collision, adjust the <code>tap_threshold</code>.</li>
+<li>If it stops before collision, adjust the <code>tap_threshold_dhz</code>.</li>
 </ol>
 <p>Repeat until nozzle would softly touch the bed.
 It easier to do so with clean nozzle and by visual inspection of the process.</p>
 <p>You can streamline the process by placing the toolhead at the center once.
 And upon config restart, trick the machine into thinking that Z is homed.</p>
-<div class="highlight"><pre><span></span><code>SET_KINEMATIC_POSITION Z=0
+<div class="highlight"><pre><span></span><code>SET_KINEMATIC_POSITION X=&lt;middle&gt; Y=&lt;middle&gt; Z=0
 G0 Z5 # Optional retract
 PROBE METHOD=tap
 </code></pre></div>
@@ -1565,7 +1565,7 @@ the speed of the descent.
 If you take 24 photos per second of the moving train, you can only estimate
 where the train was between photos.</p>
 <p>It is possible to reduce the descending speed. It may require decrease of
-absolute <code>tap_hz_threshold</code> value.</p>
+absolute <code>tap_threshold_dhz</code> value.</p>
 <p>It is possible to tap over non-conductive surfaces as long as there is metal
 behind it within the sensor's sensitivity range.
 Max distance can be approximated to be about 1.5x of the coil's narrowest part.</p>
