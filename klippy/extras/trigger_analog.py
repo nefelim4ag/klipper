@@ -69,6 +69,10 @@ class DigitalFilter:
     def get_initial_state(self):
         return self.initial_state
 
+    def filtfilt(self, data):
+        import scipy.signal as signal
+        return signal.sosfiltfilt(self.filter_sections, data)
+
 # Produce sample to sample difference (derivative) of a DigitalFilter
 class DerivativeFilter:
     def __init__(self, main_filter):
