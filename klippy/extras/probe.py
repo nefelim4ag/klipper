@@ -58,7 +58,8 @@ class ProbeCommandHelper:
         # Other commands
         gcode.register_command('PROBE_ACCURACY', self.cmd_PROBE_ACCURACY,
                                desc=self.cmd_PROBE_ACCURACY_help)
-        if replace_z_offset:
+        self._replace_z_offset = replace_z_offset
+        if self._replace_z_offset:
             return
         gcode.register_command('Z_OFFSET_APPLY_PROBE',
                                self.cmd_Z_OFFSET_APPLY_PROBE,
@@ -96,6 +97,8 @@ class ProbeCommandHelper:
         configfile.set(self.name, 'z_offset', "%.3f" % (z_offset,))
     cmd_PROBE_CALIBRATE_help = "Calibrate the probe's z_offset"
     def cmd_PROBE_CALIBRATE(self, gcmd):
+        if self._replace_z_offset:
+            raise gcmd.error("Probe z_offset calibration is not applicable")
         manual_probe.verify_no_manual_probe(self.printer)
         params = self.probe.get_probe_params(gcmd)
         # Perform initial probe
