@@ -555,6 +555,69 @@ stepcompress_reset(struct stepcompress *sc, uint64_t last_step_clock)
     return 0;
 }
 
+static void debug(struct stepcompress *sc, uint64_t clock, int64_t last_position)
+{
+    // struct list_node node;
+    // uint64_t first_clock, last_clock;
+    // int64_t start_position;
+    // int step_count, interval, add;
+
+    // Cut unhappened items
+    int skipped = 0;
+    struct history_steps *hs;
+    if (list_empty(&sc->history_list))
+        return;
+
+    while (!list_empty(&sc->history_list)) {
+        hs = list_first_entry(&sc->history_list, struct history_steps, node);
+        if (clock < hs->first_clock) {
+            fprintf(stderr, "removed node with %i steps\n", hs->step_count);
+            list_del(&hs->node);
+            free(hs);
+            skipped++;
+            continue;
+        }
+        break;
+    }
+    if (!skipped) {
+        fprintf(stderr, "new clock in the future %lu, %lu\n",
+            hs->last_clock, clock);
+        return;
+    }
+
+    if (clock >= hs->last_clock) {
+        fprintf(stderr, "it is the last step\n");
+        return;
+    }
+
+    fprintf(stderr, "orig step count %i\n", hs->step_count);
+    while (hs->step_count != 0) {
+        // Edit last history node
+        int count = hs->step_count;
+        if (hs->step_count < 0) {
+            count = -hs->step_count;
+            hs->step_count = hs->step_count + 1;
+        } else {
+            hs->step_count = hs->step_count - 1;
+        }
+        int32_t addfactor = count*(count-1)/2;
+        uint32_t ticks = hs->add*addfactor + hs->interval*(count-1);
+        hs->last_clock = hs->first_clock + ticks;
+        if (hs->last_clock == clock) {
+            fprintf(stderr, "ideal match\n");
+            return;
+        }
+        if (hs->last_clock < clock) {
+            fprintf(stderr, "new step count %i\n", hs->step_count);
+            fprintf(stderr, "Mismatch, exit %lu < %lu\n", hs->last_clock,
+                clock);
+            fprintf(stderr, "Positions %li %li\n", hs->start_position + hs->step_count,
+                last_position);
+            return;
+        }
+    }
+}
+
 // Set last_position in the stepcompress object
 int __visible
 stepcompress_set_last_position(struct stepcompress *sc, uint64_t clock
@@ -564,6 +627,8 @@ stepcompress_set_last_position(struct stepcompress *sc, uint64_t clock
     if (ret)
         return ret;
     sc->last_position = last_position;
+
+    debug(sc, clock, last_position);
 
     // Add a marker to the history list
     struct history_steps *hs = malloc(sizeof(*hs));
