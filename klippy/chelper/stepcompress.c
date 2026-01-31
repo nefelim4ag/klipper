@@ -127,9 +127,14 @@ compress_bisect_add(struct stepcompress *sc, int32_t pref_interval)
     int32_t bestinterval = 0, bestcount = 1, bestadd = 1, bestreach = INT32_MIN;
     int32_t zerointerval = 0, zerocount = 0;
 
+    // Control the transition from previous move
     int32_t pref_i = pref_interval;
-    if (outer_mininterval + 1 < pref_i && pref_i < outer_maxinterval)
-        outer_mininterval = pref_i - FLAT_LINE_JITTER;
+    if (pref_i <= outer_mininterval)
+        outer_maxinterval = (outer_maxinterval+outer_mininterval)/2;
+    else if (pref_i >= outer_maxinterval)
+        outer_mininterval = (outer_mininterval+outer_maxinterval)/2;
+    else
+        outer_mininterval = pref_i;
 
     for (;;) {
         // Find longest valid sequence with the given 'add'
