@@ -1513,7 +1513,11 @@ change per second (velocity) is high enough - higher than the noise level,
 and that upon collision it always decreases by at least this value.</p>
 <div class="highlight"><pre><span></span><code>[probe_eddy_current my_probe]
 # eddy probe configuration...
-tap_threshold: 0
+tap_threshold: 0 # 0 means tap is disabled
+</code></pre></div>
+
+<p>Before setting it to any other value, it is necessary to install <code>scipy</code>:</p>
+<div class="highlight"><pre><span></span><code>~/klippy-env/bin/pip<span class="w"> </span>install<span class="w"> </span>scipy
 </code></pre></div>
 
 <p>The suggested calibration routine works as follows:</p>
@@ -1559,6 +1563,10 @@ z_offset: 1.010 # noise 0.000400mm, MAD_Hz=14.000
 11.314 * 2 = 22.628
 </code></pre></div>
 
+<p>To further fine tune threshold, one can use <code>PROBE_ACCURACY METHOD=tap</code>.
+The range is expected to be about 0.02 mm,
+with the default probe speed of 5 mm/s.
+Elevated coil temperature may increase noise and may require additional tuning.</p>
 <p>You can validate the tap precision by measuring the paper thickness
 from the initial calibration guide. It is expected to be ~0.1mm.</p>
 <p>Tap precision is limited by the sampling frequency and
