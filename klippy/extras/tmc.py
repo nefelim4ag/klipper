@@ -674,16 +674,25 @@ class TMCVirtualPinHelper:
         # Enable/disable stealthchop
         self._state["tpwmthrs"] = self.fields.get_field("tpwmthrs")
         reg = self.fields.lookup_register("en_pwm_mode", None)
+        sg4_thrs = 0
+        if self.fields.lookup_register("sg4_thrs", None) is not None:
+            sg4_thrs = self.fields.get_field("sg4_thrs")
         if reg is None:
             # On "stallguard4" drivers, "stealthchop" must be enabled
             spread_field = "en_spreadcycle"
             self._state[spread_field] = not self.fields.get_field(spread_field)
             self.set_field("tpwmthrs", 0)
             self.set_field("en_spreadcycle", 0)
-        else:
+        elif sg4_thrs == 0:
             # On earlier drivers, "stealthchop" must be disabled
             self._state["en_pwm_mode"] = self.fields.get_field("en_pwm_mode")
             self.set_field("en_pwm_mode", 0)
+            self.set_field(self.diag_pin_field, 1)
+        else:
+            # TMC2240 in SG4
+            self._state["en_pwm_mode"] = self.fields.get_field("en_pwm_mode")
+            self.set_field("en_pwm_mode", 1)
+            self.set_field("tpwmthrs", 0)
             self.set_field(self.diag_pin_field, 1)
         # Enable tcoolthrs (if not already)
         self._state["tcoolthrs"] = self.fields.get_field("tcoolthrs")
