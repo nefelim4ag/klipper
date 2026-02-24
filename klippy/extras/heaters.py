@@ -91,6 +91,14 @@ class Heater:
             temp_diff = temp - self.smoothed_temp
             adj_time = min(time_diff * self.inv_smooth_time, 1.)
             self.smoothed_temp += temp_diff * adj_time
+            if self.smoothed_temp > 1000.:
+                logging.error("temps: %.2f %.2f %.2f" % (
+                              temp_diff, temp, self.smoothed_temp))
+                logging.error("times: %.3f %.3f %.3f" % (
+                              time_diff, read_time, self.last_temp_time))
+                logging.error("adj_time: %f, inv_smooth_time: %f" % (
+                              adj_time, self.inv_smooth_time))
+                raise
             self.can_extrude = (self.smoothed_temp >= self.min_extrude_temp)
         #logging.debug("temp: %.3f %f = %f", read_time, temp)
     def _handle_shutdown(self):
