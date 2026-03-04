@@ -5971,7 +5971,17 @@ additional parameters if a <code>[probe_eddy_current]</code> section is defined:
 <li><code>TAP_THRESHOLD=&lt;value&gt;</code>: This overrides the <code>tap_threshold</code>
   specified in the <code>[probe_eddy_current]</code> config section when probing
   using <code>METHOD=tap</code>.</li>
+<li><code>LIFT_ACCEL=&lt;value&gt;</code>: This sets an upper bound on acceleration when
+  moving away from the bed after a "tap" probe. It only aplies to
+  "METHOD=tap" probes. The default is 100mm/s^2.</li>
 </ul>
+<p>The <code>Z_OFFSET_APPLY_PROBE</code> command is also extended to support a
+<code>METHOD=tap</code> parameter. When no METHOD parameter is provided, the
+<code>Z_OFFSET_APPLY_PROBE</code> command alters the probe calibration to apply
+the current Z G-Code offset to future <code>scan</code>, <code>rapid_scan</code>, and
+default probes. If <code>METHOD=tap</code> is specified then the command instead
+applies the change to <code>tap_z_offset</code> so that future <code>tap</code> probes are
+updated to use the current Z G-Code offset.</p>
 <h4 id="probe_eddy_current_calibrate">PROBE_EDDY_CURRENT_CALIBRATE<a class="headerlink" href="#probe_eddy_current_calibrate" title="Permanent link">&para;</a></h4>
 <p><code>PROBE_EDDY_CURRENT_CALIBRATE CHIP=&lt;config_name&gt;</code>: This starts a tool
 that calibrates the sensor resonance frequencies to corresponding Z
