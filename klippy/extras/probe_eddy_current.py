@@ -505,6 +505,8 @@ class EddyTap:
         self._gather = None
         self._filter_design = None
         self._tap_z_offset = config.getfloat('tap_z_offset', 0.)
+        self._untap_pre_tension = config.getfloat('untap_pre_tension', 0.,
+                                                above=0.)
         self._tap_threshold = config.getfloat('tap_threshold', 0., above=0.)
         if self._tap_threshold:
             self._setup_tap()
@@ -661,6 +663,9 @@ class EddyTap:
         trig_pos = phoming.probing_move(self._trigger_analog, pos, speed)
         # Perform lifting move
         haltpos = toolhead.get_position()
+        haltpos[2] -= self._untap_pre_tension
+        toolhead.manual_move(haltpos, lift_speed)
+        toolhead.dwell(0.010)
         haltpos[2] += lift_dist
         retract_start_time = toolhead.get_last_move_time()
         toolhead.manual_move(haltpos, lift_speed)
