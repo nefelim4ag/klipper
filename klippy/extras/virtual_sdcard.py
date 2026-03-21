@@ -13,6 +13,45 @@ DEFAULT_ERROR_GCODE = """
 {% endif %}
 """
 
+PAGE_SIZE = 8192
+DATA_PREV = 1024
+DATA_NEXT = 128
+
+class FilePager:
+    def __init__(self, file_object):
+        self.file_object = file_object
+        self.pages = {}
+        self._pos = file_object.tell()
+    def seek(self, pos):
+        self._pos = pos
+    def tell(self):
+        return self._pos
+    def _page_index(self, pos):
+        return pos // PAGE_SIZE
+    def _page_offset(self, pos):
+        return pos % PAGE_SIZE
+    def cache_offset(self, offset):
+        offset = max(offset, 0)
+        page_num = self._page_index(offset)
+        if self.pages.get(page_num, None) is not None:
+            return
+        data_offset = max(page_num * PAGE_SIZE - PAGE_SIZE, 0)
+        self.file_object.seek(data_offset)
+        self.pages[page_num] = self.file_object.read(PAGE_SIZE)
+    def read(self):
+        self.cache_offset(self._pos)
+        page_num = self._page_index(self._pos)
+        page_offset = self._page_offset(self._pos)
+        data = self.pages[page_num][page_offset:]
+        self._pos += len(data)
+        # Recycle
+        if self.pages.get(page_num - 3, None) is not None:
+            del self.pages[page_num - 3]
+        return data
+    def __getattr__(self, name):
+        attr = getattr(self.file_object, name)
+        return attr
+
 class VirtualSD:
     def __init__(self, config):
         self.printer = config.get_printer()
@@ -49,11 +88,15 @@ class VirtualSD:
     def _handle_analyze_shutdown(self, msg, details):
         if self.work_timer is not None:
             self.must_pause_work = True
+            readpos = max(self.file_position - DATA_PREV, 0)
+            readcount = self.file_position - readpos
+            page_num = readpos // PAGE_SIZE
+            offset_in_page = readpos % PAGE_SIZE
             try:
-                readpos = max(self.file_position - 1024, 0)
-                readcount = self.file_position - readpos
-                self.current_file.seek(readpos)
-                data = self.current_file.read(readcount + 128)
+                data = self.current_file.pages.get(page_num, "")
+                data = data[offset_in_page:]
+                data += self.current_file.pages.get(page_num + 1, "")
+                data = data[:readcount + DATA_NEXT]
             except:
                 logging.exception("virtual_sdcard shutdown read")
                 return
@@ -192,7 +235,7 @@ class VirtualSD:
             raise gcmd.error("Unable to open file")
         gcmd.respond_raw("File opened:%s Size:%d" % (filename, fsize))
         gcmd.respond_raw("File selected")
-        self.current_file = f
+        self.current_file = FilePager(f)
         self.file_position = 0
         self.file_size = fsize
         self.print_stats.set_current_file(filename)
@@ -240,7 +283,7 @@ class VirtualSD:
             if not lines:
                 # Read more data
                 try:
-                    data = self.current_file.read(8192)
+                    data = self.current_file.read()
                 except:
                     logging.exception("virtual_sdcard read")
                     break
