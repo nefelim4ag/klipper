@@ -3,7 +3,7 @@
 # Copyright (C) 2016-2018  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import math, logging
+import math, mathutil, logging
 from . import heaters
 
 TUNE_HYSTERESIS = 5.0
@@ -46,6 +46,8 @@ class PIDCalibrate:
         if calibrate.check_busy(0., 0., 0.):
             raise gcmd.error("pid_calibrate interrupted")
         # Log and report results
+        calibrate.initial_heatup()
+        calibrate.fit(self.printer)
         Kp, Ki, Kd = calibrate.calc_final_pid()
         logging.info("Autotune: final: Kp=%f Ki=%f Kd=%f", Kp, Ki, Kd)
         gcmd.respond_info(
@@ -81,8 +83,10 @@ class ControlAutoTune:
         # Track initial heat-up curve
         self.heatup_samples = []
         # First Order Plus Dead Time model params
-        self.min_gain = .0
-        self.min_tau = .0
+        self.gain_min = 1.0
+        self.tau_guess = 1.0
+        self.gain = .0
+        self.tau = .0
         self.dead_time_avg = .0
     # Heater control
     def set_pwm(self, read_time, value):
@@ -142,9 +146,6 @@ class ControlAutoTune:
         if len(self.peaks) <= 2:
             return
         self.track_dead_time()
-        if len(self.peaks) < 4:
-            return
-        self.calc_pid(len(self.peaks)-1)
     def initial_heatup(self):
         if self.heatup_samples:
             return self.heatup_samples
@@ -165,40 +166,63 @@ class ControlAutoTune:
         for sample in temp_samples:
             if start_time < sample[0] < end_time:
                 self.heatup_samples.append(sample)
-        return self.heatup_samples
-    def calc_pid(self, pos):
-        peak_temp = max([temp for time, temp in self.peaks])
-        self.min_gain = peak_temp - self.start_temp + TUNE_HYSTERESIS/2
-        self.initial_heatup()
+        self.gain_min = self.heatup_samples[-1][1] - self.heatup_samples[0][1]
         # Tau is the time when the temperature reaches 63.2% of plateau
         # Describes how dynamic the system is
-        temp_at_tau = self.start_temp + self.min_gain * 0.632
+        temp_at_tau = self.heatup_samples[0][1] + self.gain_min * 0.632
         for sample in self.heatup_samples:
-            if sample[1] > temp_at_tau:
-                self.min_tau = sample[0] - self.heatup_samples[0][0]
+            if sample[1] >= temp_at_tau:
+                self.tau_guess = sample[0] - self.heatup_samples[0][0]
+                break
+        return self.heatup_samples
+    def least_squares_error(self, params):
+        gain = params['gain']
+        time_constant = params['time_constant']
+        if gain <= 0. or time_constant <= 0.:
+            return 9.9e99
+        samples = self.heatup_samples
+        start_time = samples[0][0]
+        T0 = samples[0][1]
+        err = .0
+        for t, temp in samples[1:]:
+            y = temp - T0
+            dt = t - start_time
+            x = (1.0 - math.exp(-dt/time_constant))
+            err += (gain * x - y) ** 2
+        # Bias towards real A
+        if gain < self.gain_min:
+            err += (self.gain_min - gain) ** 2 * len(samples)
+        return err
+    def fit(self, printer):
+        params = {
+            'gain': self.gain_min,
+            'time_constant': self.tau_guess
+        }
+        # Fit FOPDT model to measured temperatures
+        adj_params = ('gain', 'time_constant')
+        new_params = mathutil.background_coordinate_descent(
+            printer, adj_params, params, self.least_squares_error)
+        self.gain = new_params['gain'] / self.heater_max_power
+        self.tau = new_params['time_constant']
+    def calc_final_pid(self):
+        peak_temp = max([temp for time, temp in self.peaks])
         # dead time is theta
         dead_time = [dtime for _, dtime in self.dead_time]
         self.dead_time_avg = max(0.6, sum(dead_time)/len(dead_time))
-        # Use Skogestad IMC to estimate Kc, Ti
-        gain = self.min_gain
-        tau = self.min_tau
+        # Use Skogestad IMC to estimate Kc, Ti, Td
+        tau = self.tau
         theta = self.dead_time_avg
-        Kc = (1 / gain) * tau / (theta + theta)
+        Kc = (1 / self.gain) * tau / (theta + theta)
         Ti = min(tau, 8 * theta)
         Td = theta / 2
         Kp = Kc * heaters.PID_PARAM_BASE
         Ki = Kp / Ti
         Kd = Kp * Td
         msg = "Autotune: %.3fC/%.3f | " % (peak_temp, self.heater_max_power)
-        msg += "Gain=%.3f Tau=%.3f DeadT=%.3f | " % (gain, tau, theta)
+        msg += "Gain=%.3f Tau=%.3f DeadT=%.3f | " % (self.gain, tau, theta)
         msg += "Kp=%f Ki=%f Kd=%f" % (Kp, Ki, Kd)
         logging.info(msg)
         return Kp, Ki, Kd
-    def calc_final_pid(self):
-        cycle_times = [(self.peaks[pos][0] - self.peaks[pos-2][0], pos)
-                       for pos in range(4, len(self.peaks))]
-        midpoint_pos = sorted(cycle_times)[len(cycle_times)//2][1]
-        return self.calc_pid(midpoint_pos)
     # Offline analysis helper
     def write_file(self, filename):
         pwm = ["pwm: %.3f %.3f" % (time, value)
