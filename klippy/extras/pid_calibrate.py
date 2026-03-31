@@ -6,7 +6,7 @@
 import math, mathutil, logging
 from . import heaters
 
-TUNE_HYSTERESIS = 5.0
+TUNE_HYSTERESIS = 2.5
 
 class PIDCalibrate:
     def __init__(self, config):
