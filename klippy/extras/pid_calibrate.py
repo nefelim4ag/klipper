@@ -25,15 +25,19 @@ class PIDCalibrate:
         except self.printer.config_error as e:
             raise gcmd.error(str(e))
         cfg_max_power = heater.get_max_power()
-        max_power = gcmd.get_float('MAX_POWER', cfg_max_power,
+        max_power = gcmd.get_float('MAX_POWER', cfg_max_power * 0.75,
                                    maxval=cfg_max_power, above=0.)
+        cycle_power = gcmd.get_float('CYCLE_POWER', cfg_max_power,
+                                     maxval=cfg_max_power, minval=max_power)
+        gcmd.respond_info("heat up pwm: %.2f, cycle pwm: %.2f" % (
+                          max_power, cycle_power))
         self.printer.lookup_object('toolhead').get_last_move_time()
         reactor = self.printer.get_reactor()
         eventtime = reactor.monotonic()
         ctemp, target_temp = heater.get_temp(eventtime)
         if ctemp > target - TUNE_HYSTERESIS * 2:
            raise gcmd.error("Starting temperature should be less than target")
-        calibrate = ControlAutoTune(heater, target, max_power)
+        calibrate = ControlAutoTune(heater, target, max_power, cycle_power)
         old_control = heater.set_control(calibrate)
         try:
             pheaters.set_temperature(heater, target, True)
@@ -77,8 +81,10 @@ class PIDCalibrate:
         configfile.set(cfgname, 'pid_Kd', "%.3f" % (Kd,))
 
 class ControlAutoTune:
-    def __init__(self, heater, target, max_power):
+    def __init__(self, heater, target, max_power, cycle_power):
         self.heater = heater
+        self.cycle_max_power = cycle_power
+        self.heat_up_max_power = max_power
         self.heater_max_power = max_power
         self.calibrate_temp = target
         # Heating control
@@ -166,6 +172,8 @@ class ControlAutoTune:
             self.peak = -9999999.
         if len(self.peaks) <= 2:
             return
+        # Control the balance between tight and sluggish control
+        self.heater_max_power = self.cycle_max_power
         self.track_dead_time()
     def initial_heatup(self):
         if self.heatup_samples:
@@ -219,7 +227,7 @@ class ControlAutoTune:
         adj_params = ('gain', 'time_constant', 'tau_b')
         new_params = mathutil.background_coordinate_descent(
             printer, adj_params, params, self.least_squares_error)
-        self.gain = new_params['gain'] / self.heater_max_power
+        self.gain = new_params['gain'] / self.heat_up_max_power
         self.tau = new_params['time_constant']
         self.tau_b = new_params['tau_b']
     def calc_final_pid(self):
@@ -236,7 +244,7 @@ class ControlAutoTune:
         Kp = Kc * heaters.PID_PARAM_BASE
         Ki = Kp / Ti
         Kd = Kp * Td
-        msg = "Autotune: %.3fC/%.3f | " % (peak_temp, self.heater_max_power)
+        msg = "Autotune: %.3fC/%.3f | " % (peak_temp, self.heat_up_max_power)
         msg += "Gain=%.3f Tau=%.3f DeadT=%.3f TauB=%.3f | " % (
             self.gain, tau, theta, self.tau_b)
         msg += "Kp=%f Ki=%f Kd=%f" % (Kp, Ki, Kd)
