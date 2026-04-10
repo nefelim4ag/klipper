@@ -87,6 +87,7 @@ class ControlAutoTune:
         self.tau_guess = 1.0
         self.gain = .0
         self.tau = .0
+        self.tau_b = .0
         self.dead_time_avg = .0
     # Heater control
     def set_pwm(self, read_time, value):
@@ -149,19 +150,14 @@ class ControlAutoTune:
     def initial_heatup(self):
         if self.heatup_samples:
             return self.heatup_samples
-        start_temp = self.temp_samples[0][1]
-        i = 0
+        start_sample = self.temp_samples[0]
+        # Find minimum temperature
         for sample in self.temp_samples[1:]:
-            if start_temp > sample[1]:
-                start_temp = sample[1]
-                i = self.temp_samples.index(sample)
+            if start_sample[1] > sample[1]:
+                start_sample = sample
+        i = self.temp_samples.index(start_sample)
         temp_samples = self.temp_samples[i:]
-        start_temp += TUNE_HYSTERESIS / 2
-        start_time = temp_samples[0][0]
-        for time, temp in temp_samples:
-            if temp >= start_temp:
-                start_time = time
-                break
+        start_time = start_sample[0]
         end_time = self.pwm_samples[1][0]
         for sample in temp_samples:
             if start_time < sample[0] < end_time:
@@ -178,7 +174,8 @@ class ControlAutoTune:
     def least_squares_error(self, params):
         gain = params['gain']
         time_constant = params['time_constant']
-        if gain <= 0. or time_constant <= 0.:
+        tau_b = params['tau_b']
+        if gain <= 0. or time_constant <= 0. or tau_b <= 0.:
             return 9.9e99
         samples = self.heatup_samples
         start_time = samples[0][0]
@@ -188,22 +185,23 @@ class ControlAutoTune:
             y = temp - T0
             dt = t - start_time
             x = (1.0 - math.exp(-dt/time_constant))
-            err += (gain * x - y) ** 2
-        # Bias towards real A
-        if gain < self.gain_min:
-            err += (self.gain_min - gain) ** 2 * len(samples)
+            x2 = (1.0 - math.exp(-dt/tau_b))
+            err += (gain * x * x2 - y) ** 2
         return err
     def fit(self, printer):
         params = {
             'gain': self.gain_min,
-            'time_constant': self.tau_guess
+            'time_constant': self.tau_guess,
+            # Second order correction
+            'tau_b': 1.0
         }
         # Fit FOPDT model to measured temperatures
-        adj_params = ('gain', 'time_constant')
+        adj_params = ('gain', 'time_constant', 'tau_b')
         new_params = mathutil.background_coordinate_descent(
             printer, adj_params, params, self.least_squares_error)
         self.gain = new_params['gain'] / self.heater_max_power
         self.tau = new_params['time_constant']
+        self.tau_b = new_params['tau_b']
     def calc_final_pid(self):
         peak_temp = max([temp for time, temp in self.peaks])
         # dead time is theta
@@ -219,7 +217,8 @@ class ControlAutoTune:
         Ki = Kp / Ti
         Kd = Kp * Td
         msg = "Autotune: %.3fC/%.3f | " % (peak_temp, self.heater_max_power)
-        msg += "Gain=%.3f Tau=%.3f DeadT=%.3f | " % (self.gain, tau, theta)
+        msg += "Gain=%.3f Tau=%.3f DeadT=%.3f TauB=%.3f | " % (
+            self.gain, tau, theta, self.tau_b)
         msg += "Kp=%f Ki=%f Kd=%f" % (Kp, Ki, Kd)
         logging.info(msg)
         return Kp, Ki, Kd
