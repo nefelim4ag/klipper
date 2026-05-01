@@ -17,6 +17,9 @@ FILEHEADER = """
 #include "command.h"
 #include "compiler.h"
 #include "initial_pins.h"
+
+// evm platform calls
+#include "riscv-evm.h"
 """
 
 def error(msg):
@@ -598,6 +601,88 @@ const uint32_t command_identify_size PROGMEM
         return fmt % (''.join(out), len(zdatadict), len(datadict))
 
 Handlers.append(HandleIdentify())
+
+
+######################################################################
+# Enumeration and static string generation
+######################################################################
+
+FW_CALL_MIN_ID = 1
+
+# Generate a dynamic string to integer mapping
+class HandleFirmwareCalls:
+    def __init__(self):
+        self.definitions = []
+        self.functions = {}
+        self.ctr_dispatch = {
+            'DECL_FW_CALL': self.decl_firmware_call
+        }
+    def decl_firmware_call(self, req):
+        definition = req.split("DECL_FW_CALL ")[1]
+        self.definitions.append(definition)
+    def update_data_dictionary(self, data):
+        fn_names = {}
+        self.definitions = sorted(self.definitions,
+                                  key=lambda s: s.split("|")[1])
+        for i, s in enumerate(self.definitions):
+            fn_name = s.split("|")[1]
+            if fn_name in fn_names:
+                prev = fn_names[fn_name]
+                error("Function %s != %s is already defined" % (prev, s))
+            fn_names[fn_name] = s
+            self.functions[s] = i + FW_CALL_MIN_ID
+        data['enumerations']["fw_calls"] = self.functions
+    def generate_code(self, options):
+        code = []
+        dummy_defs = ""
+        anon_struct = []
+        for raw_def, id in self.functions.items():
+            params = raw_def.split("|")
+            ret_type = params.pop(0)
+            fn_name = params.pop(0)
+            args = params
+            arg_types = []
+            for i, arg in enumerate(args):
+                arg_parts = arg.split(' ')
+                is_pointer = " *" if "*" in arg else ""
+                type_def = " ".join(arg_parts[:-1])
+                if "struct " in type_def and type_def not in anon_struct:
+                    anon_struct.append(type_def)
+                    dummy_defs += "%s;\n" % type_def
+                type_def += "%s" % is_pointer
+                arg_types.append(type_def)
+            dummy_defs += "extern %s %s(%s);\n" % (
+                ret_type, fn_name, ", ".join(arg_types)
+            )
+            handler = '    if (id == %d) {\n' % (id)
+            arg_names = []
+            for i, arg in enumerate(args):
+                arg_parts = arg.split(' ')
+                is_pointer = " *" if "*" in arg else ""
+                type_def = " ".join(arg_parts[:-1])
+                handler += '        %s = (%s%s) regs[%d];\n' % (
+                    arg, type_def, is_pointer, i)
+                arg_names.append(arg_parts[-1].strip("*"))
+            if ret_type != 'void':
+                handler += '        %s ret = %s(%s);\n' % (
+                    ret_type, fn_name, ", ".join(arg_names))
+                handler += '        regs[0] = (uint32_t) ret;\n'
+            else:
+                handler += '        %s(%s);\n' % (
+                    fn_name, ", ".join(arg_names))
+            handler += '    }\n'
+            code.append(handler)
+        fmt = """
+%s
+inline void
+platform_ecall(const uint16_t id, uint32_t *regs)
+{
+    %s
+}
+"""
+        return fmt % (dummy_defs, "".join(code).strip())
+
+Handlers.append(HandleFirmwareCalls())
 
 
 ######################################################################

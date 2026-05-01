@@ -12,6 +12,7 @@
 #include "sched.h" // DECL_SHUTDOWN
 #include "spi_software.h" // spi_software_setup
 #include "spicmds.h" // spidev_transfer
+#include "riscv_evm.h" // DECL_FW_CALL
 
 struct spidev_s {
     union {
@@ -48,6 +49,7 @@ spidev_oid_lookup(uint8_t oid)
 {
     return oid_lookup(oid, command_config_spi);
 }
+DECL_FW_CALL1(struct spidev_s *, spidev_oid_lookup, uint8_t oid);
 
 void
 command_spi_set_bus(uint32_t *args)
@@ -108,6 +110,8 @@ spidev_transfer(struct spidev_s *spi, uint8_t receive_data
     if (flags & SF_HAVE_PIN)
         gpio_out_write(spi->pin, !(flags & SF_CS_ACTIVE_HIGH));
 }
+DECL_FW_CALL4(void, spidev_transfer, struct spidev_s *spi, uint8_t receive_data
+                , uint8_t data_len, uint8_t *data);
 
 void
 command_spi_transfer(uint32_t *args)
