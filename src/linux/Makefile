@@ -1,5 +1,5 @@
 # Additional linux build rules
-
+CFLAGS += -m32
 dirs-y += src/linux src/generic
 
 src-y += linux/main.c linux/timer.c linux/console.c linux/watchdog.c
