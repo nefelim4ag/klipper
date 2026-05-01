@@ -10,6 +10,7 @@
 #include "command.h"  //sendf
 #include "sched.h" //DECL_COMMAND
 #include "board/gpio.h" //i2c_write/read/setup
+#include "riscv_evm.h" // DECL_EVM_CALL
 #include "i2c_software.h" // i2c_software_setup
 #include "i2ccmds.h"
 
@@ -36,6 +37,7 @@ i2cdev_oid_lookup(uint8_t oid)
 {
     return oid_lookup(oid, command_config_i2c);
 }
+DECL_FW_CALL1(struct i2cdev_s *, i2cdev_oid_lookup, uint8_t oid);
 
 void
 command_i2c_set_bus(uint32_t *args)
@@ -68,6 +70,7 @@ void i2c_shutdown_on_err(int ret)
         shutdown("I2C Timeout");
     }
 }
+DECL_FW_CALL1(void, i2c_shutdown_on_err, int ret);
 
 int i2c_dev_write(struct i2cdev_s *i2c, uint8_t write_len, uint8_t *data)
 {
@@ -77,6 +80,7 @@ int i2c_dev_write(struct i2cdev_s *i2c, uint8_t write_len, uint8_t *data)
     else
         return i2c_write(i2c->i2c_hw, write_len, data);
 }
+DECL_FW_CALL3(int, i2c_dev_write, struct i2cdev_s *i2c, uint8_t write_len, uint8_t *data);
 
 int i2c_dev_read(struct i2cdev_s *i2c, uint8_t reg_len, uint8_t *reg
                   , uint8_t read_len, uint8_t *read)
@@ -87,6 +91,8 @@ int i2c_dev_read(struct i2cdev_s *i2c, uint8_t reg_len, uint8_t *reg
     else
         return i2c_read(i2c->i2c_hw, reg_len, reg, read_len, read);
 }
+DECL_FW_CALL5(int, i2c_dev_read, struct i2cdev_s *i2c, uint8_t reg_len, uint8_t *reg,
+    uint8_t read_len, uint8_t *read);
 
 void command_i2c_transfer(uint32_t *args)
 {
