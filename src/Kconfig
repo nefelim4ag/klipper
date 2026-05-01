@@ -189,11 +189,16 @@ config NEED_SOS_FILTER
     bool
     depends on WANT_TRIGGER_ANALOG
     default y
+config WANT_RISCV_EVM
+    bool
+    default y
 menu "Optional features (to reduce code size)"
     depends on HAVE_LIMITED_CODE_SIZE
 config WANT_ADC
     bool "Support micro-controller based ADC (analog to digital)"
     depends on HAVE_GPIO_ADC
+config WANT_RISCV_EVM
+    bool "Support embedded RISCV VM"
 config WANT_SPI
     bool "Support communicating with external chips via SPI bus"
     depends on HAVE_GPIO && HAVE_GPIO_SPI
