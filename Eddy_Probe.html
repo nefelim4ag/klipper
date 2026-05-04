@@ -1540,8 +1540,9 @@ gcode:
 the nozzle makes contact with the bed. That bed contact may cause a
 change in sensor measurements which can be detected and used to halt
 further downward movement. The nozzle is then lifted away from the bed
-and the sensor results from the lifting movement are analyzed to
-determine the location where the nozzle breaks contact with the bed.</p>
+and the sensor measurements during the lifting movement are analyzed
+to determine the location where the nozzle breaks contact with the
+bed.</p>
 <p>In order to utilize "tap" probing it is necessary to configure a
 <code>tap_threshold</code> parameter. This parameter determines when downward
 toolhead movement during a "tap" probe should be halted. A value too
@@ -1551,14 +1552,15 @@ small could result in a "tap" probe attempt halting before making
 contact with the bed, which could result in wildly inaccurate probe
 results.</p>
 <p>The <code>PROBE_EDDY_CURRENT_TAP_CALIBRATE</code> command can be used to
-configure an appropriate <code>tap_threshold</code> value. Before using this
-tool, be sure to run the main <code>PROBE_EDDY_CURRENT_CALIBRATE</code> tool and
-save its results. Then follow the following steps:</p>
+configure an appropriate <code>tap_threshold</code> value. This tool may be run
+after completing the main <code>PROBE_EDDY_CURRENT_CALIBRATE</code> calibration.
+Follow these steps to calibrate <code>tap_threshold</code>:</p>
 <ol>
 <li>
-<p>Enable the printer, home the printer, move the toolhead to a
-   position near the center of the bed, and make sure the nozzle is
-   between 3 - 10 millimeters from the bed.</p>
+<p>Verify that both the nozzle and bed are clean. Enable the printer,
+   home the printer, move the toolhead to a position near the center
+   of the bed, and make sure the nozzle is between 3 - 10 millimeters
+   from the bed.</p>
 </li>
 <li>
 <p>The next step involves commanding the nozzle to make contact with
@@ -1571,8 +1573,8 @@ save its results. Then follow the following steps:</p>
    calibration to make an initial coarse guess for the tap_threshold
    value and it then performs the corresponding "tap" probe. Ideally
    the above command will cause the probe to descend until it hits the
-   bed, lift away from the bed, and then report a valid probe
-   result. If not, see the paragraphs at the end of this section to
+   bed, lift away from the bed, and then report a valid probe result.
+   If not, see the paragraphs at the end of this section to
    troubleshoot. If the attempt was successful then continue to the
    next step.</p>
 </li>
@@ -1595,9 +1597,10 @@ save its results. Then follow the following steps:</p>
    between 3 - 10mm above the bed, be ready to issue an emergency
    halt, and then run the following command:
    <code>PROBE_EDDY_CURRENT_TAP_CALIBRATE TAP=verify</code>
-   Ideally the above command will also succeed; if not, see the
-   paragraphs at the end of this section to troubleshoot. If the
-   attempt was successful then continue to the next step.</p>
+   This command will probe the bed five times in a row. Ideally the
+   above command will also succeed; if not, see the paragraphs at the
+   end of this section to troubleshoot. If the attempt was successful
+   then continue to the next step.</p>
 </li>
 <li>
 <p>If all of the above steps are successful then one can issue a
