@@ -9,11 +9,9 @@
 
 static uint8_t counter = 0;
 
-__section(".start")
-void task(uint32_t *args, uint8_t *data)
+__section(".command")
+void command(uint8_t oid, uint8_t data_len, uint8_t *data)
 {
-    uint8_t oid = args[0];
-    uint8_t data_len = args[1];
     uint8_t new_data[48];
     for (uint8_t i = 0; i < data_len; i++) {
         new_data[i] = data[i];
@@ -27,4 +25,10 @@ void task(uint32_t *args, uint8_t *data)
     }
     counter++;
     evm_response(oid, data_len + 1 + 4, new_data);
+}
+
+__section(".task")
+void task(uint32_t *args, uint8_t *data)
+{
+    uint8_t oid = args[0];
 }

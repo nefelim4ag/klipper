@@ -21,9 +21,11 @@ class EmbeddedVM:
         # Compile something
         self.CC      = "riscv64-linux-gnu-gcc"
         self.OBJCOPY = "riscv64-linux-gnu-objcopy"
+        self.NM      = "riscv64-linux-gnu-nm"
         self.CFLAGS  = "-O2 -march=rv32e -mabi=ilp32e -ffreestanding " \
                        "-nostdlib -fPIE -Wvla -Werror=vla " \
                        "-Werror=stack-usage=256 " \
+                       "-ffunction-sections -fdata-sections " \
                        "-I%s" % self.dir
         self._run(["which", self.CC], )
         self._run(["which", self.OBJCOPY])
@@ -33,13 +35,14 @@ class EmbeddedVM:
         self.mcu.register_config_callback(self._build_config)
         self.printer.register_event_handler("klippy:connect",
                                             self.handle_connect)
+
     def _run(self, cmd):
-        logging.info(cmd)
         cmd = " ".join(cmd)
-        r = subprocess.run(cmd, shell=True)
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         if r.returncode != 0:
             raise self.printer.command_error("Command failed (exit %d})" %
                                              r.returncode)
+        return r.stdout
 
     def read_bytes(self, path):
         with open(path, "rb") as f:
@@ -77,20 +80,41 @@ class EmbeddedVM:
             header_template += '\n'
         with open("%s/uapi-gen.h" % dir, "w") as f:
             f.write(header_template)
+
+    def _compile(self):
+        dir = self.dir
         self._run([self.CC, self.CFLAGS, "-c", "-o", "%s/code.o" % (dir),
                    "%s/code.c" % (dir)])
         self._run([self.CC, self.CFLAGS,
-                   "-T %s/rv32e.ld -static -Wl,--build-id=none -o" % dir,
-                   "%s/code.elf" % dir, "%s/code.o" % dir])
+                   "-T %s/rv32e.ld -static -Wl,--build-id=none " % dir,
+                   "-Wl,--gc-sections ",
+                   "-o %s/code.elf" % dir, "%s/code.o" % dir])
         self._run([self.OBJCOPY, "-O binary", "%s/code.elf" % dir,
                    "%s/code.bin" % dir])
+        symbol_list = self._run([self.NM, "--radix=d", "%s/code.elf" % dir])
+        entry_points = {}
+        for line in symbol_list.split('\n'):
+            if not line:
+                continue
+            offset, symbol_type, name = line.split(' ')
+            if symbol_type != 'T':
+                continue
+            entry_points[name] = int(offset)
+        return entry_points
 
     def _build_config(self):
         dir = self.dir
         byte_code = self.read_bytes("%s/code.bin" % dir)
-
-        self.mcu.add_config_cmd("config_evm oid=%d data_size=%d" % (
-                self._oid, len(byte_code)))
+        self._generate_header()
+        symbols = self._compile()
+        print(symbols)
+        cmd_offset = symbols.get("command", 0)
+        task_offset = symbols.get("task", 0)
+        self.mcu.add_config_cmd("config_evm oid=%d data_size=%d "
+                                "command_offset=%d task_offset=%d "
+                                "evm_mode=%d" % (
+                                self._oid, len(byte_code),
+                                cmd_offset, task_offset, 0))
         # Lookup commands
         self._evm_update_cmd = self.mcu.lookup_command(
             "evm_update oid=%c pos=%hu data=%*s",
@@ -99,7 +123,6 @@ class EmbeddedVM:
             "evm_send oid=%c data=%*s", cq=self.cmd_queue)
         self._evm_query = self.mcu.lookup_command(
             "evm_query oid=%c rest_ticks=%u", cq=self.cmd_queue)
-        self._generate_header()
 
     def handle_connect(self):
         dir = os.path.dirname(os.path.abspath(__file__))
