@@ -80,7 +80,8 @@ int i2c_dev_write(struct i2cdev_s *i2c, uint8_t write_len, uint8_t *data)
     else
         return i2c_write(i2c->i2c_hw, write_len, data);
 }
-DECL_FW_CALL3(int, i2c_dev_write, struct i2cdev_s *i2c, uint8_t write_len, uint8_t *data);
+DECL_FW_CALL3(int, i2c_dev_write, struct i2cdev_s *i2c, uint8_t write_len,
+    uint8_t *data);
 
 int i2c_dev_read(struct i2cdev_s *i2c, uint8_t reg_len, uint8_t *reg
                   , uint8_t read_len, uint8_t *read)
@@ -91,8 +92,8 @@ int i2c_dev_read(struct i2cdev_s *i2c, uint8_t reg_len, uint8_t *reg
     else
         return i2c_read(i2c->i2c_hw, reg_len, reg, read_len, read);
 }
-DECL_FW_CALL5(int, i2c_dev_read, struct i2cdev_s *i2c, uint8_t reg_len, uint8_t *reg,
-    uint8_t read_len, uint8_t *read);
+DECL_FW_CALL5(int, i2c_dev_read, struct i2cdev_s *i2c, uint8_t reg_len,
+    uint8_t *reg, uint8_t read_len, uint8_t *read);
 
 void command_i2c_transfer(uint32_t *args)
 {
