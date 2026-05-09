@@ -4,8 +4,8 @@
 # Copyright (C) 2018  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import math, logging
-from . import bus
+import os, math, logging
+from . import bus, evm
 
 
 ######################################################################
@@ -14,6 +14,10 @@ from . import bus
 
 REPORT_TIME = 0.300
 MAX_INVALID_COUNT = 3
+
+CHIP_MAP = {
+    "MAX31865": 0
+}
 
 class SensorBase:
     def __init__(self, config, chip_type, config_cmd=None, spi_mode=1):
@@ -27,12 +31,23 @@ class SensorBase:
         if config_cmd is not None:
             self.spi.spi_send(config_cmd)
         self.mcu = mcu = self.spi.get_mcu()
+        dir = os.path.dirname(os.path.abspath(__file__))
+        cfile = "%s/spi_temperature.c" % dir
+        flags = {
+            "CHIP_TYPE": CHIP_MAP[chip_type],
+        }
+        self.evm = evm.evm.EmbeddedVM(self.mcu, cfile, flags)
         # Reader chip configuration
-        self.oid = oid = mcu.create_oid()
+        oid = self.evm.get_oid()
+        # mcu.register_serial_response(
+        #     self._handle_spi_response,
+        #     "thermocouple_result oid=%c next_clock=%u value=%u fault=%c", oid)
         mcu.register_serial_response(
-            self._handle_spi_response,
-            "thermocouple_result oid=%c next_clock=%u value=%u fault=%c", oid)
-        mcu.register_config_callback(self._build_config)
+            self._handle_evm_response,
+            "evm_response oid=%c response=%*s", oid)
+        # mcu.register_config_callback(self._build_config)
+        self.printer.register_event_handler("klippy:connect",
+                                            self.handle_connect)
     def setup_minmax(self, min_temp, max_temp):
         adc_range = [self.calc_adc(min_temp), self.calc_adc(max_temp)]
         self.min_sample_value = min(adc_range)
@@ -62,6 +77,33 @@ class SensorBase:
         last_read_clock = next_clock - self._report_clock
         last_read_time  = self.mcu.clock_to_print_time(last_read_clock)
         self._callback(last_read_time, temp)
+    def _handle_evm_response(self, params):
+        response = params['response']
+        # logging.info(response)
+        fault = response[8]
+        value = response[3] << 24 | \
+                response[2] << 16 | response[1] << 8 | response[0]
+        if fault:
+            self.handle_fault(value, fault)
+            return
+        temp = self.calc_temp(value)
+        next_clock =  response[7] << 24 | \
+                      response[6] << 16 | response[5] << 8 | response[4]
+        last_read_clock = next_clock - self._report_clock
+        last_read_time  = self.mcu.clock_to_print_time(last_read_clock)
+        self._callback(last_read_time, temp)
+    def handle_connect(self):
+        min_sv = self.min_sample_value.to_bytes(4, byteorder="little")
+        msg = min_sv
+        max_sv = self.max_sample_value.to_bytes(4, byteorder="little")
+        msg += max_sv
+        max_ic = MAX_INVALID_COUNT
+        msg += max_ic.to_bytes(4, byteorder="little")
+        spi_oid = self.spi.get_oid().to_bytes(1, byteorder="little")
+        msg += spi_oid
+        self.evm.send(msg)
+        self._report_clock = self.mcu.seconds_to_clock(REPORT_TIME)
+        self.evm.query(self._report_clock)
     def report_fault(self, msg):
         logging.warning(msg)
 
