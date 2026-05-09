@@ -28,7 +28,7 @@ void command(uint8_t oid, uint8_t data_len, uint8_t *data)
 }
 
 __section(".task")
-void task(uint32_t *args, uint8_t *data)
+void task(uint8_t oid, struct evm *vm)
 {
-    uint8_t oid = args[0];
+    return;
 }
