@@ -639,6 +639,10 @@ class HandleFirmwareCalls:
         for raw_def, id in self.functions.items():
             params = raw_def.split("|")
             ret_type = params.pop(0)
+            type_def = ret_type.strip("*").strip()
+            if "struct" in type_def and type_def not in anon_struct:
+                anon_struct.append(type_def)
+                dummy_defs += "%s;\n" % type_def
             fn_name = params.pop(0)
             args = params
             arg_types = []

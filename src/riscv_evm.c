@@ -16,34 +16,33 @@ DECL_FW_CALL(uint32_t, timer_read_time);
 static struct task_wake evm_wake;
 
 void evm_print(const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    vprintf(fmt, ap);
-    va_end(ap);
+    // va_list ap;
+    // va_start(ap, fmt);
+    // vprintf(fmt, ap);
+    // va_end(ap);
 }
 
 enum {
-    MODE_RESPONSE = 0,
+    MODE_RESPONSE,
     MODE_BULK,
 };
 
-// DECL_ENUMERATION("evm_mode", "mode_command", MODE_RESPONSE);
-// DECL_ENUMERATION("evm_mode", "mode_bulk", MODE_BULK);
+DECL_ENUMERATION("evm_mode", "mode_command", MODE_RESPONSE);
+DECL_ENUMERATION("evm_mode", "mode_bulk", MODE_BULK);
 
 enum {
     EVM_PENDING = 1,
 };
-DECL_ENUMERATION("evm_task_flags", "pending", EVM_PENDING);
+DECL_ENUMERATION("evm_flags", "EVM_PENDING", EVM_PENDING);
 
 struct evm {
     struct timer timer;
     uint32_t rest_ticks;
     struct sensor_bulk *sb;
     uint16_t flags;
-    uint16_t command_offset;
     uint16_t task_offset;
     uint16_t data_size;
-    uint8_t byte_code[];
+    uint8_t *byte_code;
 };
 
 void sched_wake_evm(void) {
@@ -64,26 +63,32 @@ evm_event(struct timer *timer)
 void
 command_config_evm(uint32_t *args)
 {
-    uint32_t byte_code_size = args[1];
-    byte_code_size += sizeof(struct evm);
-    struct evm *bc = oid_alloc(args[0], command_config_evm, byte_code_size);
+    uint8_t oid = args[0];
+    struct evm *bc = oid_alloc(oid, command_config_evm, sizeof(struct evm));
     bc->timer.func = evm_event;
     bc->data_size = args[1];
+    bc->byte_code = alloc_chunk(bc->data_size);
     bc->sb = NULL;
-    bc->command_offset = args[2];
-    bc->task_offset = args[3];
-    if (args[4] == MODE_BULK) {
+    bc->task_offset = args[2];
+    if (args[3] == MODE_BULK) {
         bc->sb = alloc_chunk(sizeof(struct sensor_bulk));
     }
 }
 DECL_COMMAND(command_config_evm, "config_evm oid=%c data_size=%hu "
-    "command_offset=%hu task_offset=%u evm_mode=%u");
+    "task_offset=%hu evm_mode=%hu");
+
+struct evm *
+evm_oid_lookup(uint8_t oid)
+{
+    return oid_lookup(oid, command_config_evm);
+}
+DECL_FW_CALL1(struct evm *, evm_oid_lookup, uint8_t oid);
 
 void
 command_update_evm(uint32_t *args)
 {
     uint8_t oid = args[0];
-    struct evm *bc = oid_lookup(oid, command_config_evm);
+    struct evm *bc = evm_oid_lookup(oid);
     uint_fast16_t pos = args[1];
     uint_fast8_t data_len = args[2];
     uint8_t *data = command_decode_ptr(args[3]);
@@ -107,7 +112,7 @@ command_evm_send(uint32_t *args)
         .a2 = (uint32_t) data,
     };
     uint8_t *end = bc->byte_code + bc->data_size;
-    uint8_t *entry = bc->byte_code + bc->command_offset;
+    uint8_t *entry = bc->byte_code;
     evm_interpreter(entry, end,
         EVM_MODE_INT_DEBUG, &vm_args);
 }
@@ -120,6 +125,17 @@ evm_response(uint8_t oid, uint8_t rlen, uint8_t *rdata)
 }
 DECL_FW_CALL3(void, evm_response, uint8_t oid, uint8_t rlen, uint8_t *rdata);
 
+uint16_t
+update_evm_flags(uint8_t oid, uint16_t set_bits, uint16_t clear_bits)
+{
+    struct evm *vm = evm_oid_lookup(oid);
+    vm->flags |= set_bits;
+    vm->flags &= ~clear_bits;
+    return vm->flags;
+}
+DECL_FW_CALL3(uint16_t, update_evm_flags, uint8_t oid, uint16_t set_bits,
+              uint16_t clear_bits);
+
 void
 evm_reschedule_timer(struct evm *bc)
 {
@@ -128,6 +144,12 @@ evm_reschedule_timer(struct evm *bc)
     sched_add_timer(&bc->timer);
     irq_enable();
 }
+
+uint32_t get_next_wake_time(uint8_t oid) {
+    struct evm *vm = evm_oid_lookup(oid);
+    return vm->timer.waketime;
+}
+DECL_FW_CALL1(uint32_t, get_next_wake_time, uint8_t oid);
 
 void
 command_evm_query(uint32_t *args)
@@ -159,7 +181,7 @@ evm_query(struct evm *vm, uint8_t oid)
     uint8_t *entry = vm->byte_code + vm->task_offset;
     uint8_t *end = vm->byte_code + vm->data_size;
     evm_interpreter(entry, end,
-        EVM_MODE_INT_DEBUG, &vm_args);
+        EVM_MODE_INT, &vm_args);
 }
 
 void
