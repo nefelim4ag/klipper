@@ -83,6 +83,10 @@ class SensorBase:
         fault = response[8]
         value = response[3] << 24 | \
                 response[2] << 16 | response[1] << 8 | response[0]
+        next_clock =  response[7] << 24 | \
+                      response[6] << 16 | response[5] << 8 | response[4]
+        last_read_clock = next_clock - self._report_clock
+        last_read_time  = self.mcu.clock_to_print_time(last_read_clock)
         if fault:
             self.handle_fault(value, fault)
             return
