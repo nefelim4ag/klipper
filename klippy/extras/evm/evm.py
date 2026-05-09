@@ -22,7 +22,7 @@ class EmbeddedVM:
         self.CC      = "riscv64-%s-gcc"
         self.OBJCOPY = "riscv64-%s-objcopy"
         self.NM      = "riscv64-%s-nm"
-        self.CFLAGS  = "-O2 -march=rv32e -mabi=ilp32e -ffreestanding " \
+        self.CFLAGS  = "-O2 -march=rv32ec -mabi=ilp32e -ffreestanding " \
                        "-nostdlib -fPIE -Wvla -Werror=vla " \
                        "-Werror=stack-usage=256 " \
                        "-ffunction-sections -fdata-sections " \
@@ -125,28 +125,33 @@ class EmbeddedVM:
         binfile = "%s.bin" % self.cfile
         self._run([self.OBJCOPY, "-O binary", elffile, binfile])
         self.binfile = binfile
-        symbol_list = self._run([self.NM, "--radix=d", elffile])
+        symbol_list = self._run([self.NM, "-nS --radix=d", elffile])
         entry_points = {}
+        max_offset = 0
+        max_offset_size = 0
         for line in symbol_list.split('\n'):
             if not line:
                 continue
-            offset, symbol_type, name = line.split(' ')
+            offset, size, symbol_type, name = line.split(' ')
+            if int(offset) > max_offset:
+                max_offset_size = int(size)
+                max_offset = int(offset)
             if symbol_type != 'T':
                 continue
             entry_points[name] = int(offset)
-        return entry_points
+        total_size = max_offset + max_offset_size
+        return entry_points, total_size
 
     def _build_config(self):
         self._generate_header()
-        symbols = self._compile()
+        symbols, total_size = self._compile()
         cmd_offset = symbols.get("command", 0)
         if cmd_offset != 0:
             self.printer.command_error("evm command function must be first")
         task_offset = symbols.get("task", 0)
-        binfile_size = len(self.read_bytes(self.binfile))
         self.mcu.add_config_cmd("config_evm oid=%d data_size=%d "
                                 "task_offset=%d evm_mode=%s" % (
-                                self._oid, binfile_size, task_offset,
+                                self._oid, total_size, task_offset,
                                 'mode_command'))
         # Lookup commands
         self._evm_update_cmd = self.mcu.lookup_command(
