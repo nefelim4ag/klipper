@@ -22,7 +22,7 @@ class EmbeddedVM:
         self.CC      = "riscv64-%s-gcc"
         self.OBJCOPY = "riscv64-%s-objcopy"
         self.NM      = "riscv64-%s-nm"
-        self.CFLAGS  = "-O2 -march=rv32ec -mabi=ilp32e -ffreestanding " \
+        self.CFLAGS  = "-O2 -march=rv32e -mabi=ilp32e -ffreestanding " \
                        "-nostdlib -fPIE -Wvla -Werror=vla " \
                        "-Werror=stack-usage=256 " \
                        "-ffunction-sections -fdata-sections " \
