@@ -262,6 +262,9 @@ class Homing:
         curpos[2] -= ppos.bed_z
         self.toolhead.set_position(curpos)
     def _do_home_z_via_probe(self, rails, forcepos, movepos):
+        if movepos[0] is not None or movepos[1] is not None:
+            raise self.printer.command_error(
+                "Can only home Z with probe:z_virtual_endstop")
         endstops = [es for rail in rails for es in rail.get_endstops()]
         homing_info = rails[0].get_homing_info()
         # Create probe session
