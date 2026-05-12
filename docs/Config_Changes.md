@@ -8,6 +8,11 @@ All dates in this document are approximate.
 
 ## Changes
 
+20260519: The internal implementation of "probe:z_virtual_endstop" has
+changed. Most users will not observe a change in behavior. The
+"probe:z_virtual_endstop" is now only valid on printers with a basic
+cartesian-style Z axis.
+
 20260501: The handling of the `[probe_eddy_current]` `tap_threshold`
 config option and associated `TAP_THRESHOLD` G-Code parameter has
 changed. It will be necessary to recalibrate the value. See the
