@@ -159,6 +159,11 @@ class DataLogger:
         for stepper in motion_report.get("steppers", []):
             avail.append(("stepq:" + stepper, "motion_report/dump_stepper",
                           {"name": stepper}))
+        heaters = status.get("heaters", {})
+        avaliable_heaters = heaters.get("available_heaters", [])
+        for heater_name in avaliable_heaters:
+            avail.append(("heater:" + heater_name, "heaters/dump",
+                          {"name": heater_name}))
         # config based subsciriptions
         config = status["configfile"]["settings"]
         cfgtypes = {p[0]: p for p in ConfigSubscriptions}

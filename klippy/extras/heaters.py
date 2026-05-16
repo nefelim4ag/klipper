@@ -4,6 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import os, logging, threading
+from . import bulk_sensor
 
 
 ######################################################################
@@ -17,6 +18,7 @@ PID_PARAM_BASE = 255.
 MAX_MAINTHREAD_TIME = 5.0
 QUELL_STALE_TIME = 7.0
 MIN_PWM_CHANGE_RATIO = 0.05
+BATCH_INTERVAL = 0.6
 
 class Heater:
     def __init__(self, config, sensor):
@@ -60,6 +62,14 @@ class Heater:
                                          maxval=self.pwm_delay)
         self.mcu_pwm.setup_cycle_time(pwm_cycle_time)
         self.mcu_pwm.setup_max_duration(MAX_HEAT_TIME)
+        # Bulk API
+        self.samples = []
+        self.dump_running = False
+        self.batch_bulk = bulk_sensor.BatchBulkHelper(
+            self.printer, self._dump, self._start, self._stop, BATCH_INTERVAL)
+        api_resp = {'header': ('time', 'temperature', 'pwm')}
+        self.batch_bulk.add_mux_endpoint("heaters/dump", "name",
+                                         self.name, api_resp)
         # Load additional modules
         self.printer.load_object(config, "verify_heater %s" % (short_name,))
         self.printer.load_object(config, "pid_calibrate")
@@ -90,6 +100,8 @@ class Heater:
             self.last_temp = temp
             self.last_temp_time = read_time
             self.control.temperature_update(read_time, temp, self.target_temp)
+            if self.dump_running:
+                self.samples.append((read_time, temp, self.last_pwm_value))
             temp_diff = temp - self.smoothed_temp
             adj_time = min(time_diff * self.inv_smooth_time, 1.)
             self.smoothed_temp += temp_diff * adj_time
@@ -134,6 +146,18 @@ class Heater:
         if target_temp:
             target_temp = max(self.min_temp, min(self.max_temp, target_temp))
         self.target_temp = target_temp
+    def _start(self):
+        self.dump_running = True
+    def _stop(self):
+        self.dump_running = False
+        with self.lock:
+            self.samples = []
+    def _dump(self, eventtime):
+        samples = []
+        with self.lock:
+            samples = self.samples
+            self.samples = []
+        return {"data": samples}
     def stats(self, eventtime):
         est_print_time = self.mcu_pwm.get_mcu().estimated_print_time(eventtime)
         if not self.printer.is_shutdown():
