@@ -71,7 +71,6 @@ class VirtualSD:
         self.work_timer = None
         # Error handling
         gcode_macro = self.printer.load_object(config, 'gcode_macro')
-        self.printer.load_object(config, 'aio_executor')
         self.on_error_gcode = gcode_macro.load_template(
             config, 'on_error_gcode', DEFAULT_ERROR_GCODE)
         # Register commands
@@ -225,13 +224,11 @@ class VirtualSD:
         flist = [f[0] for f in files]
         files_by_lower = { fname.lower(): fname for fname, fsize in files }
         fname = filename
-        aio = self.printer.lookup_object('aio_executor')
         try:
             if fname not in flist:
                 fname = files_by_lower[fname.lower()]
             fname = os.path.join(self.sdcard_dirname, fname)
-            f = aio.get_wrapper(io.open, fname, 'r', newline='')
-            f.set_thread_name(filename)
+            f = io.open(fname, 'r', newline='')
             f.seek(0, os.SEEK_END)
             fsize = f.tell()
             f.seek(0)
