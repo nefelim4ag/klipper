@@ -39,6 +39,10 @@ class SensorBase:
         self.max_sample_value = max(adc_range)
     def setup_callback(self, cb):
         self._callback = cb
+    def temp_round(self, temp):
+        val = self.calc_adc(temp)
+        logging.info("adc count: %.1f" % (val))
+        return self.calc_temp(val)
     def get_report_time_delta(self):
         return REPORT_TIME
     def _build_config(self):

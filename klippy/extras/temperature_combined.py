@@ -73,6 +73,9 @@ class PrinterSensorCombined:
     def setup_callback(self, temperature_callback):
         self.temperature_callback = temperature_callback
 
+    def temp_round(self, temp):
+        return temp
+
     def get_report_time_delta(self):
         return REPORT_TIME
 
