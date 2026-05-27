@@ -64,9 +64,14 @@ class SHT3X:
         self.printer.add_object("sht3x " + self.name, self)
         self.printer.register_event_handler("klippy:connect",
                                             self.handle_connect)
+        self.printer.register_event_handler("klippy:shutdown",
+                                            self._handle_shutdown)
     def handle_connect(self):
         self._init_sht3x()
         self.reactor.update_timer(self.sample_timer, self.reactor.NOW)
+
+    def _handle_shutdown(self):
+        self.reactor.unregister_timer(self.sample_timer)
 
     def setup_minmax(self, min_temp, max_temp):
         self.min_temp = min_temp
