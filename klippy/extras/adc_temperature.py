@@ -3,7 +3,7 @@
 # Copyright (C) 2016-2024  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import logging, bisect, math
+import logging, bisect
 
 
 ######################################################################
@@ -28,14 +28,6 @@ class PrinterADCtoTemperature:
         self.temperature_callback = temperature_callback
     def get_report_time_delta(self):
         return REPORT_TIME
-    def temp_round(self, temp):
-        max_adc = self.mcu_adc.get_adc_count()
-        # Compensate for oversampling
-        max_adc = max_adc * math.log(SAMPLE_COUNT, 4) / SAMPLE_COUNT
-        val = int(self.adc_convert.calc_adc(temp) * max_adc + 0.5)
-        logging.info("adc count: %.1f/%.1f" % (val, max_adc))
-        val = val / max_adc
-        return self.adc_convert.calc_temp(val)
     def adc_callback(self, samples):
         read_time, read_value = samples[-1]
         temp = self.adc_convert.calc_temp(read_value)
