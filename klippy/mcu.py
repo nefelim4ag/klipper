@@ -565,7 +565,6 @@ class MCU_adc:
         self._oid = self._callback = None
         self._mcu.register_config_callback(self._build_config)
         self._inv_max_adc = 0.
-        self._mcu_adc_max = 0
         self._unpack_from = struct.Struct('<H').unpack_from
     def get_mcu(self):
         return self._mcu
@@ -583,8 +582,6 @@ class MCU_adc:
         self._callback = callback
     def get_last_value(self):
         return self._last_state
-    def get_adc_count(self):
-        return 1.0 / self._inv_max_adc
     def _build_config(self):
         if not self._sample_count:
             return

@@ -110,8 +110,6 @@ class Heater:
     def get_smooth_time(self):
         return self.smooth_time
     def set_temp(self, degrees):
-        new_degrees = self.sensor.temp_round(degrees)
-        logging.info("achievable: %.3f" % (new_degrees))
         if degrees and (degrees < self.min_temp or degrees > self.max_temp):
             raise self.printer.command_error(
                 "Requested temperature (%.1f) out of range (%.1f:%.1f)"
