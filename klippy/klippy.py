@@ -4,6 +4,8 @@
 # Copyright (C) 2016-2024  Kevin O'Connor <kevin@koconnor.net>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
+import tracemalloc
+tracemalloc.start()
 import sys, os, gc, optparse, logging, time, collections, importlib
 import util, reactor, queuelogger, msgproto
 import gcode, configfile, pins, mcu, toolhead, webhooks
@@ -167,6 +169,10 @@ class Printer:
             logging.exception("Unhandled exception during ready callback")
             self.invoke_shutdown("Internal error during ready callback: %s"
                                  % (str(e),))
+        snapshot = tracemalloc.take_snapshot()
+        for stat in snapshot.statistics('lineno')[:200]:
+            logging.info(stat)
+        tracemalloc.stop()
     def _handle_analyze_shutdown(self, msg, details):
         logging.info(self.reactor.dump_debug())
     def run(self):
