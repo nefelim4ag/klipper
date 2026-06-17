@@ -118,10 +118,11 @@ class ExtruderStepper:
             if rotation_dist < 0.:
                 next_invert_dir = not orig_invert_dir
                 rotation_dist = -rotation_dist
-            toolhead = self.printer.lookup_object('toolhead')
-            toolhead.flush_step_generation()
             self.stepper.set_rotation_distance(rotation_dist)
-            self.stepper.set_dir_inverted(next_invert_dir)
+            if next_invert_dir != orig_invert_dir:
+                toolhead = self.printer.lookup_object('toolhead')
+                toolhead.flush_step_generation()
+                self.stepper.set_dir_inverted(next_invert_dir)
         else:
             rotation_dist, spr = self.stepper.get_rotation_distance()
         invert_dir, orig_invert_dir = self.stepper.get_dir_inverted()

@@ -14,6 +14,7 @@ typedef double (*sk_calc_callback)(struct stepper_kinematics *sk, struct move *m
 typedef void (*sk_post_callback)(struct stepper_kinematics *sk);
 struct stepper_kinematics {
     double step_dist, commanded_pos;
+    double next_step_dist;
     struct stepcompress *sc;
 
     double last_flush_time, last_move_time;

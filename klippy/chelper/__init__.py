@@ -79,6 +79,8 @@ defs_itersolve = """
     int32_t itersolve_is_active_axis(struct stepper_kinematics *sk, char axis);
     void itersolve_set_trapq(struct stepper_kinematics *sk, struct trapq *tq
         , double step_dist);
+    void itersolve_update_step_dist(struct stepper_kinematics *sk
+                                    , double step_dist);
     struct trapq *itersolve_get_trapq(struct stepper_kinematics *sk);
     double itersolve_calc_position_from_coord(struct stepper_kinematics *sk
         , double x, double y, double z);

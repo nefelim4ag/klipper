@@ -138,8 +138,8 @@ class MCU_stepper:
     def set_rotation_distance(self, rotation_dist):
         mcu_pos = self.get_mcu_position()
         self._rotation_dist = rotation_dist
-        self._step_dist = rotation_dist / self._steps_per_rotation
-        self.set_trapq(self._trapq)
+        step_dist = rotation_dist / self._steps_per_rotation
+        self.update_step_dist(step_dist)
         self._set_mcu_position(mcu_pos)
     def get_dir_inverted(self):
         return self._invert_dir, self._orig_invert_dir
@@ -236,6 +236,11 @@ class MCU_stepper:
         old_tq = self._trapq
         self._trapq = tq
         return old_tq
+    def update_step_dist(self, step_dist):
+        _, ffi_lib = chelper.get_ffi()
+        self._step_dist = step_dist
+        ffi_lib.itersolve_update_step_dist(self._stepper_kinematics,
+                                           self._step_dist)
     def add_active_callback(self, cb):
         self._active_callbacks.append(cb)
         if len(self._active_callbacks) == 1:

@@ -182,6 +182,16 @@ itersolve_generate_steps(struct stepper_kinematics *sk, struct stepcompress *sc
                                                     , flush_time);
             if (ret)
                 return ret;
+            // Smoothly transition step size
+            if (sk->next_step_dist > sk->step_dist) {
+                sk->step_dist += sk->step_dist * 0.05;
+                if (sk->step_dist > sk->next_step_dist)
+                    sk->step_dist = sk->next_step_dist;
+            } else if (sk->next_step_dist < sk->step_dist) {
+                sk->step_dist -= sk->step_dist * 0.05;
+                if (sk->step_dist < sk->next_step_dist)
+                    sk->step_dist = sk->next_step_dist;
+            }
             if (move_end >= flush_time) {
                 sk->last_move_time = flush_time;
                 return 0;
@@ -245,6 +255,13 @@ itersolve_set_trapq(struct stepper_kinematics *sk, struct trapq *tq
 {
     sk->tq = tq;
     sk->step_dist = step_dist;
+    sk->next_step_dist = step_dist;
+}
+
+void __visible
+itersolve_update_step_dist(struct stepper_kinematics *sk, double step_dist)
+{
+    sk->next_step_dist = step_dist;
 }
 
 struct trapq * __visible
