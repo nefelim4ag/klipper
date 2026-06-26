@@ -94,6 +94,7 @@ class enumeration_error(error):
         return self.enum_name, self.value
 
 class Enumeration:
+    __slots__ = ["pt", "max_length", "enum_name", "enums", "reverse_enums"]
     is_int = False
     is_dynamic_string = False
     def __init__(self, pt, enum_name, enums):
@@ -132,7 +133,7 @@ def lookup_params(msgformat, enumerations={}):
                 pt = Enumeration(pt, enum_name, enums)
                 break
         out.append((name, pt))
-    return out
+    return tuple(out)
 
 # Lookup the message types for a debugging "output()" format string
 def lookup_output_params(msgformat):
@@ -151,7 +152,7 @@ def lookup_output_params(msgformat):
             else:
                 raise error("Invalid output format for '%s'" % (msgformat,))
         args = args[pos+1:]
-    return param_types
+    return tuple(param_types)
 
 # Update the message format to be compatible with python's % operator
 def convert_msg_format(msgformat):
@@ -160,6 +161,8 @@ def convert_msg_format(msgformat):
     return msgformat
 
 class MessageFormat:
+    __slots__ = ["msgid_bytes", "msgformat", "debugformat",
+                 "name", "param_names", "param_types", "name_to_type"]
     def __init__(self, msgid_bytes, msgformat, enumerations={}):
         self.msgid_bytes = msgid_bytes
         self.msgformat = msgformat
