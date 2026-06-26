@@ -16,6 +16,7 @@ class ReactorError(Exception):
     pass
 
 class ReactorTimer:
+    __slots__ = ["callback", "waketime", "timer_is_running", "whoami"]
     def __init__(self, callback, waketime, whoami=None):
         self.callback = callback
         self.waketime = waketime
@@ -26,6 +27,7 @@ class ReactorTimer:
 
 class ReactorCompletion:
     class sentinel: pass
+    __slots__ = ["reactor", "result", "waiting"]
     def __init__(self, reactor):
         self.reactor = reactor
         self.result = self.sentinel
@@ -47,6 +49,7 @@ class ReactorCompletion:
         return self.result
 
 class ReactorCallback:
+    __slots__ = ["reactor", "timer", "callback", "completion"]
     def __init__(self, reactor, callback, waketime):
         self.reactor = reactor
         whoami = util.get_python_function_owner(callback)
@@ -92,6 +95,8 @@ class ReactorGreenlet(greenlet.greenlet):
         self.tpause = time.perf_counter()
 
 class ReactorMutex:
+    __slots__ = ["reactor", "is_locked", "next_pending", "queue",
+                 "lock", "unlock"]
     def __init__(self, reactor, is_locked):
         self.reactor = reactor
         self.is_locked = is_locked
