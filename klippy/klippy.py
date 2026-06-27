@@ -7,7 +7,6 @@
 import sys, os, gc, optparse, logging, time, collections, importlib
 import util, reactor, queuelogger, msgproto
 import gcode, configfile, pins, mcu, toolhead, webhooks
-import RestrictedPython
 
 message_ready = "Printer is ready"
 
@@ -101,28 +100,11 @@ class Printer:
             if default is not configfile.sentinel:
                 return default
             raise self.config_error("Unable to load module '%s'" % (section,))
-        # mod = importlib.import_module('extras.' + module_name)
-        source = open(py_name).read()
-        byte_code = RestrictedPython.compile_restricted(
-            source,
-            filename=py_name,
-            mode='exec',
-            policy=None # Null-Policy -> unrestricted
-        )
-        logging.info(py_name)
-        module_globals = {
-            "__name__": 'extras.' + module_name,
-            "__builtins__": globals()["__builtins__"],
-            "__file__": py_name,
-            "_getattr_": RestrictedPython.Eval.default_guarded_getattr,
-            "_getitem_": RestrictedPython.Eval.default_guarded_getitem,
-            "_getiter_": RestrictedPython.Eval.default_guarded_getiter,
-        }
-        exec(byte_code, module_globals, None)
+        mod = importlib.import_module('extras.' + module_name)
         init_func = 'load_config'
         if len(module_parts) > 1:
             init_func = 'load_config_prefix'
-        init_func = module_globals.get(init_func, None)
+        init_func = getattr(mod, init_func, None)
         if init_func is None:
             if default is not configfile.sentinel:
                 return default
