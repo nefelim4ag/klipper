@@ -49,6 +49,7 @@ class HomingHeaters:
     def handle_homing_move_begin(self, hmove):
         if not self.check_eligible(hmove.get_mcu_endstops()):
             return
+        self.printer.lookup_object("toolhead").flush_step_generation()
         for heater_name in self.disable_heaters:
             heater = self.pheaters.lookup_heater(heater_name)
             self.target_save[heater_name] = heater.get_temp(0)[1]
