@@ -105,6 +105,8 @@ class ClockSync:
                                   int(self.clock_avg - 3. * pred_stddev), clock)
         self.clock_est = (self.time_avg + self.min_half_rtt,
                           self.clock_avg, new_freq)
+        logging.info("%.3f| diff: %.6f, decay: 1/%.1f, est %s" % (
+            self.reactor.monotonic(), (clock - exp_clock)/new_freq, 1 / decay, self.clock_est))
         #logging.debug("regr %.3f: freq=%.3f d=%d(%.3f)",
         #              sent_time, new_freq, clock - exp_clock, pred_stddev)
     # clock frequency conversions
