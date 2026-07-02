@@ -76,7 +76,7 @@ class ClockSync:
         half_rtt = .5 * (receive_time - sent_time)
         aged_rtt = (sent_time - self.min_rtt_time) * RTT_AGE
         # Weight samples based on RTT
-        decay = DECAY * min(0.9, (self.min_half_rtt + aged_rtt) / half_rtt)
+        decay = DECAY * min(1.1, (self.min_half_rtt + aged_rtt) / half_rtt)
         if half_rtt < self.min_half_rtt + aged_rtt:
             self.min_half_rtt = half_rtt
             self.min_rtt_time = sent_time
