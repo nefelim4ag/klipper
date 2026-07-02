@@ -75,6 +75,8 @@ class ClockSync:
         receive_time = params['#receive_time']
         half_rtt = .5 * (receive_time - sent_time)
         aged_rtt = (sent_time - self.min_rtt_time) * RTT_AGE
+        # Weight samples based on RTT
+        decay = DECAY * min(0.9, (self.min_half_rtt + aged_rtt) / half_rtt)
         if half_rtt < self.min_half_rtt + aged_rtt:
             self.min_half_rtt = half_rtt
             self.min_rtt_time = sent_time
@@ -84,32 +86,18 @@ class ClockSync:
         exp_clock = ((sent_time - self.time_avg) * self.clock_est[2]
                      + self.clock_avg)
         clock_diff2 = (clock - exp_clock)**2
-        if (clock_diff2 > 25. * self.prediction_variance
-            and clock_diff2 > (.000500 * self.mcu_freq)**2):
-            if clock > exp_clock and sent_time < self.last_prediction_time+10.:
-                logging.debug("Ignoring clock sample %.3f:"
-                              " freq=%d diff=%d stddev=%.3f",
-                              sent_time, self.clock_est[2], clock - exp_clock,
-                              math.sqrt(self.prediction_variance))
-                return
-            logging.info("Resetting prediction variance %.3f:"
-                         " freq=%d diff=%d stddev=%.3f",
-                         sent_time, self.clock_est[2], clock - exp_clock,
-                         math.sqrt(self.prediction_variance))
-            self.prediction_variance = (.001 * self.mcu_freq)**2
-        else:
-            self.last_prediction_time = sent_time
-            self.prediction_variance = (
-                (1. - DECAY) * (self.prediction_variance + clock_diff2 * DECAY))
+        self.last_prediction_time = sent_time
+        self.prediction_variance = (
+            (1. - decay) * (self.prediction_variance + clock_diff2 * decay))
         # Add clock and sent_time to linear regression
         diff_sent_time = sent_time - self.time_avg
-        self.time_avg += DECAY * diff_sent_time
-        self.time_variance = (1. - DECAY) * (
-            self.time_variance + diff_sent_time**2 * DECAY)
+        self.time_avg += decay * diff_sent_time
+        self.time_variance = (1. - decay) * (
+            self.time_variance + diff_sent_time**2 * decay)
         diff_clock = clock - self.clock_avg
-        self.clock_avg += DECAY * diff_clock
-        self.clock_covariance = (1. - DECAY) * (
-            self.clock_covariance + diff_sent_time * diff_clock * DECAY)
+        self.clock_avg += decay * diff_clock
+        self.clock_covariance = (1. - decay) * (
+            self.clock_covariance + diff_sent_time * diff_clock * decay)
         # Update prediction from linear regression
         new_freq = self.clock_covariance / self.time_variance
         pred_stddev = math.sqrt(self.prediction_variance)
