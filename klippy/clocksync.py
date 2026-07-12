@@ -80,29 +80,14 @@ class ClockSync:
             self.min_rtt_time = sent_time
             logging.debug("new minimum rtt %.3f: hrtt=%.6f freq=%d",
                           sent_time, half_rtt, self.clock_est[2])
-        # Filter out samples that are extreme outliers
-        exp_clock = ((sent_time - self.time_avg) * self.clock_est[2]
+        diff_sent_time = sent_time - self.time_avg
+        exp_clock = (diff_sent_time * self.clock_est[2]
                      + self.clock_avg)
         clock_diff2 = (clock - exp_clock)**2
-        if (clock_diff2 > 25. * self.prediction_variance
-            and clock_diff2 > (.000500 * self.mcu_freq)**2):
-            if clock > exp_clock and sent_time < self.last_prediction_time+10.:
-                logging.debug("Ignoring clock sample %.3f:"
-                              " freq=%d diff=%d stddev=%.3f",
-                              sent_time, self.clock_est[2], clock - exp_clock,
-                              math.sqrt(self.prediction_variance))
-                return
-            logging.info("Resetting prediction variance %.3f:"
-                         " freq=%d diff=%d stddev=%.3f",
-                         sent_time, self.clock_est[2], clock - exp_clock,
-                         math.sqrt(self.prediction_variance))
-            self.prediction_variance = (.001 * self.mcu_freq)**2
-        else:
-            self.last_prediction_time = sent_time
-            self.prediction_variance = (
-                (1. - DECAY) * (self.prediction_variance + clock_diff2 * DECAY))
+        self.last_prediction_time = sent_time
+        self.prediction_variance = (
+            (1. - DECAY) * (self.prediction_variance + clock_diff2 * DECAY))
         # Add clock and sent_time to linear regression
-        diff_sent_time = sent_time - self.time_avg
         self.time_avg += DECAY * diff_sent_time
         self.time_variance = (1. - DECAY) * (
             self.time_variance + diff_sent_time**2 * DECAY)
