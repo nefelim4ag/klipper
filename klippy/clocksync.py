@@ -27,6 +27,9 @@ class ClockSync:
         self.clock_avg = self.clock_covariance = 0.
         self.prediction_variance = 0.
         self.last_prediction_time = 0.
+        # Filter samples
+        self.mean_half_rtt = .0
+        self.ignored_samples = []
     def connect(self, serial):
         self.serial = serial
         self.mcu_freq = serial.msgparser.get_constant_float('CLOCK_FREQ')
@@ -81,8 +84,20 @@ class ClockSync:
             logging.debug("new minimum rtt %.3f: hrtt=%.6f freq=%d",
                           sent_time, half_rtt, self.clock_est[2])
         diff_sent_time = sent_time - self.time_avg
-        exp_clock = (diff_sent_time * self.clock_est[2]
-                     + self.clock_avg)
+        # Filter out samples that are extreme outliers
+        self.mean_half_rtt = (1 - DECAY) * self.mean_half_rtt + DECAY * half_rtt
+        force_accept = sent_time - self.last_prediction_time > 4.0
+        if half_rtt > self.mean_half_rtt and not force_accept:
+            self.ignored_samples.append((half_rtt, clock, sent_time))
+            return
+        # Replace current with the best one
+        if force_accept:
+            self.ignored_samples.append((half_rtt, clock, sent_time))
+            sample = min(self.ignored_samples, key=lambda c: c[0])
+            half_rtt, clock, sent_time = sample
+            diff_sent_time = sent_time - self.time_avg
+        self.ignored_samples = []
+        exp_clock = (diff_sent_time * self.clock_est[2] + self.clock_avg)
         clock_diff2 = (clock - exp_clock)**2
         self.last_prediction_time = sent_time
         self.prediction_variance = (
