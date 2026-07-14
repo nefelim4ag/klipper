@@ -126,10 +126,10 @@ def plot_mcu(data, maxbw):
     ax1.set_title("MCU bandwidth and load utilization")
     ax1.set_xlabel('Time')
     ax1.set_ylabel('Usage (%)')
-    ax1.plot_date(times, bwdeltas, 'g', label='Bandwidth', alpha=0.8)
-    ax1.plot_date(times, loads, 'r', label='MCU load', alpha=0.8)
-    ax1.plot_date(times, hostbuffers, 'c', label='Host buffer', alpha=0.8)
-    ax1.plot_date(times, awake, 'y', label='Awake time', alpha=0.6)
+    ax1.plot(times, bwdeltas, 'g', label='Bandwidth', alpha=0.8)
+    ax1.plot(times, loads, 'r', label='MCU load', alpha=0.8)
+    ax1.plot(times, hostbuffers, 'c', label='Host buffer', alpha=0.8)
+    ax1.plot(times, awake, 'y', label='Awake time', alpha=0.6)
     fontP = matplotlib.font_manager.FontProperties()
     fontP.set_size('x-small')
     ax1.legend(loc='best', prop=fontP)
@@ -164,13 +164,13 @@ def plot_system(data):
     ax1.set_title("System load utilization")
     ax1.set_xlabel('Time')
     ax1.set_ylabel('Load (% of a core)')
-    ax1.plot_date(times, sysloads, '-', label='system load',
+    ax1.plot(times, sysloads, '-', label='system load',
                   color='cyan', alpha=0.8)
-    ax1.plot_date(times, cputimes, '-', label='process time',
+    ax1.plot(times, cputimes, '-', label='process time',
                   color='red', alpha=0.8)
     ax2 = ax1.twinx()
     ax2.set_ylabel('Available memory (KB)')
-    ax2.plot_date(times, memavails, '-', label='system memory',
+    ax2.plot(times, memavails, '-', label='system memory',
                   color='yellow', alpha=0.3)
     fontP = matplotlib.font_manager.FontProperties()
     fontP.set_size('x-small')
@@ -208,7 +208,7 @@ def plot_mcu_frequencies(data):
         mhz = est_mhz[key]
         label = "%s(%dMhz)" % (key, mhz)
         hz = mhz * 1000000.
-        ax1.plot_date(times, [(v - hz)/mhz for v in values], '.', label=label)
+        ax1.plot(times, [(v - hz)/mhz for v in values], '.', label=label)
     fontP = matplotlib.font_manager.FontProperties()
     fontP.set_size('x-small')
     ax1.legend(loc='best', prop=fontP)
@@ -238,7 +238,7 @@ def plot_mcu_frequency(data, mcu):
     ax1.set_ylabel('Frequency')
     for key in sorted(graph_keys):
         times, values = graph_keys[key]
-        ax1.plot_date(times, values, '.', label=key)
+        ax1.plot(times, values, '.', label=key)
     fontP = matplotlib.font_manager.FontProperties()
     fontP.set_size('x-small')
     ax1.legend(loc='best', prop=fontP)
@@ -267,13 +267,13 @@ def plot_temperature(data, heaters):
             temps.append(float(temp))
             pwm.append(float(d.get(pwm_key, 0.)))
             targets.append(float(d.get(target_key, 0.)))
-        ax1.plot_date(times, temps, '-', label='%s temp' % (heater,), alpha=0.8)
+        ax1.plot(times, temps, '-', label='%s temp' % (heater,), alpha=0.8)
         if any(targets):
             label = '%s target' % (heater,)
-            ax1.plot_date(times, targets, '-', label=label, alpha=0.3)
+            ax1.plot(times, targets, '-', label=label, alpha=0.3)
         if any(pwm):
             label = '%s pwm' % (heater,)
-            ax2.plot_date(times, pwm, '-', label=label, alpha=0.2)
+            ax2.plot(times, pwm, '-', label=label, alpha=0.2)
     # Build plot
     ax1.set_title("Temperature of %s" % (heaters,))
     ax1.set_xlabel('Time')
