@@ -72,6 +72,9 @@ class ReactorGreenlet(greenlet.greenlet):
         self.timer = None
         # Time tracking
         self.frame = None
+    def _check_slow(self):
+        if self.frame.duration > 0.05:
+            logging.warning("Slow timer: %s" % (self.frame))
     def note_start_time(self, frame, eventtime, uniq_id, whoami):
         # Borrow remote reference
         self.frame = frame
@@ -84,9 +87,10 @@ class ReactorGreenlet(greenlet.greenlet):
     def note_pause_time(self, waketime, next_frame):
         self.frame.state = "paused"
         self.frame.duration = time.perf_counter() - self.frame.duration
+        self._check_slow()
         next_frame.id = self.frame.id
         next_frame.eventtime = waketime
-        next_frame.accum += self.frame.accum + self.frame.duration
+        next_frame.accum = self.frame.accum + self.frame.duration
         next_frame.whoami = self.frame.whoami
         next_frame.state = "scheduled"
         self.frame = next_frame
@@ -98,6 +102,7 @@ class ReactorGreenlet(greenlet.greenlet):
     def note_end_time(self):
         self.frame.duration = time.perf_counter() - self.frame.duration
         self.frame.state = "finished"
+        self._check_slow()
         # Free remote reference
         self.frame = None
 
@@ -147,6 +152,10 @@ class HistoryFrame:
         self.accum = 0
         self.whoami = ""
         self.state = ""
+    def __repr__(self):
+        return "%.6f %.6f %+.6f %x %s %s" % (
+            self.eventtime, self.accum, self.duration, self.id,
+            self.whoami, self.state)
 
 class ReactorTimersHistory:
     def __init__(self, size):
