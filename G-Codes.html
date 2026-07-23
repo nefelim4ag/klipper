@@ -5903,8 +5903,8 @@ the paused state is fresh for each print.</p>
 <p>The pid_calibrate module is automatically loaded if a heater is defined
 in the config file.</p>
 <h4 id="pid_calibrate_1">PID_CALIBRATE<a class="headerlink" href="#pid_calibrate_1" title="Permanent link">&para;</a></h4>
-<p><code>PID_CALIBRATE HEATER=&lt;config_name&gt; TARGET=&lt;temperature&gt;
-[WRITE_FILE=1]</code>: Perform a PID calibration test. The specified heater
+<p><code>PID_CALIBRATE HEATER=&lt;config_name&gt; TARGET=&lt;temperature&gt; [WRITE_FILE=1]
+[MAX_POWER=1.0]</code>: Perform a PID calibration test. The specified heater
 will be enabled until the specified target temperature is reached, and
 then the heater will be turned off and on for several cycles. If the
 WRITE_FILE parameter is enabled, then the file /tmp/heattest.txt will
