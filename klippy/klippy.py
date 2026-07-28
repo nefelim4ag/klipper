@@ -157,6 +157,7 @@ class Printer:
                             % (str(e), message_restart,))
             return
         try:
+            self.reactor.set_latency_warning(0.050)
             self._set_state(message_ready)
             with self.reactor.assert_no_pause():
                 for cb in self.event_handlers.get("klippy:ready", []):

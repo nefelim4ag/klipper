@@ -19,9 +19,13 @@ class ReactorTimer:
         self.callback = callback
         self.waketime = waketime
         self.timer_is_running = False
-        self.whoami = whoami
         if whoami is None:
-            self.whoami = util.get_python_function_owner(callback)
+            whoami = util.get_python_function_owner(callback)
+        if type(whoami) == type(tuple()):
+            self.whoami = whoami
+            return
+        uniq_id = "%x" % id(self)
+        self.whoami = (uniq_id, whoami)
 
 class ReactorCompletion:
     class sentinel: pass
@@ -70,6 +74,7 @@ class ReactorGreenlet(greenlet.greenlet):
     def __init__(self, run):
         greenlet.greenlet.__init__(self, run=run)
         self.timer = None
+        self.whoami = None
 
 class ReactorMutex:
     def __init__(self, reactor, is_locked):
@@ -137,6 +142,12 @@ class SelectReactor:
         self._cached_dispatch_greenlets = []
         self._all_greenlets = []
         self._prevent_pause_count = 0
+        # Tracking of high time callbacks
+        self._poll_whoami = util.get_python_function_owner(
+            self._check_fd_activity)
+        self._latency_warning = self.NEVER
+        self._recent_eventtime = 0.
+        self._recent_callbacks = []
     # Python garbage collection
     def get_gc_stats(self):
         return tuple(self._last_gc_times)
@@ -148,10 +159,14 @@ class SelectReactor:
             return False
         # Reactor looks idle and gc is due - run it
         gc_level = 0
+        callback = "gc.collect(0)"
         if gi[1] >= 10:
             gc_level = 1
+            callback = "gc.collect(1)"
             if gi[2] >= 10:
                 gc_level = 2
+                callback = "gc.collect(2)"
+        self._recent_callbacks.append(callback)
         self._last_gc_times[gc_level] = eventtime
         gc.collect(gc_level)
         return True
@@ -188,6 +203,8 @@ class SelectReactor:
             if eventtime >= waketime:
                 t.waketime = self.NEVER
                 t.timer_is_running = True
+                g_dispatch.whoami = t.whoami
+                self._recent_callbacks.append(t.whoami)
                 t.waketime = waketime = t.callback(eventtime)
                 t.timer_is_running = False
                 if g_dispatch is not self._g_dispatch:
@@ -252,7 +269,7 @@ class SelectReactor:
             # so switch to _check_timers (via g.timer.callback return)
             return self._g_dispatch.switch(waketime)
         # Pausing the dispatch greenlet - setup timer to resume this greenlet
-        g.timer = self.register_timer(g.switch, waketime, "unpause")
+        g.timer = self.register_timer(g.switch, waketime, g.whoami)
         self._next_timer = self.NOW
         if self._cached_dispatch_greenlets:
             # Switch to _end_greenlet to activate cached dispatch greenlet
@@ -313,33 +330,54 @@ class SelectReactor:
         for fd, event in hdls:
             hdl = self._fds.get(fd, self._dummy_fd_hdl)
             if event & self._READ:
+                self._recent_callbacks.append(hdl.read_whoami)
                 hdl.read_callback(eventtime)
                 if g_dispatch is not self._g_dispatch:
                     self._end_greenlet(g_dispatch)
-                    return self.monotonic()
+                    return True
             if event & self._WRITE:
+                self._recent_callbacks.append(hdl.write_whoami)
                 hdl.write_callback(eventtime)
                 if g_dispatch is not self._g_dispatch:
                     self._end_greenlet(g_dispatch)
-                    return self.monotonic()
+                    return True
+        return False
+    # Time usage checking
+    def set_latency_warning(self, latency_warning):
+        self._latency_warning = latency_warning
+    def _get_new_eventtime(self, check_delay=True):
+        eventtime = self.monotonic()
+        latency = eventtime - self._recent_eventtime
+        if check_delay and latency > self._latency_warning:
+            logging.warning("Reactor detected %.6fs latency (%.3f %.3f): %s",
+                            latency, self._recent_eventtime, eventtime,
+                            repr(self._recent_callbacks))
+        del self._recent_callbacks[:]
+        self._recent_eventtime = eventtime
         return eventtime
     # Main loop
     def _dispatch_loop(self):
         busy = True
-        eventtime = self.monotonic()
+        eventtime = self._get_new_eventtime()
         while self._process:
             timeout = self._check_timers(eventtime, busy)
             busy = False
+            self._get_new_eventtime()
+            self._recent_callbacks.append(self._poll_whoami)
             hdls = self._check_fd_activity(timeout)
-            eventtime = self.monotonic()
+            eventtime = self._get_new_eventtime(not timeout)
             if hdls:
                 busy = True
-                eventtime = self._dispatch_fd_events(eventtime, hdls)
+                did_switch = self._dispatch_fd_events(eventtime, hdls)
+                if did_switch:
+                    eventtime = self._get_new_eventtime()
     def run(self):
         if self._pipe_fds is None:
             self._setup_async_callbacks()
         self._process = True
         self._prevent_pause_count = 0
+        self._recent_eventtime = self.monotonic()
+        self._recent_callbacks = []
         try:
             while self._process:
                 # Create new greenlet to dispatch timers and events
@@ -350,6 +388,7 @@ class SelectReactor:
                 # Control returns here on end() request or switch from pause()
         finally:
             self._g_dispatch = None
+        self._recent_callbacks = []
     def end(self):
         self._process = False
     def finalize(self):
