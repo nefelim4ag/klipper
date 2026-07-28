@@ -14,10 +14,14 @@ class ReactorError(Exception):
     pass
 
 class ReactorTimer:
-    def __init__(self, callback, waketime):
+    __slots__ = ["callback", "waketime", "timer_is_running", "whoami"]
+    def __init__(self, callback, waketime, whoami=None):
         self.callback = callback
         self.waketime = waketime
         self.timer_is_running = False
+        self.whoami = whoami
+        if whoami is None:
+            self.whoami = util.get_python_function_owner(callback)
 
 class ReactorCompletion:
     class sentinel: pass
@@ -44,7 +48,8 @@ class ReactorCompletion:
 class ReactorCallback:
     def __init__(self, reactor, callback, waketime):
         self.reactor = reactor
-        self.timer = reactor.register_timer(self.invoke, waketime)
+        whoami = util.get_python_function_owner(callback)
+        self.timer = reactor.register_timer(self.invoke, waketime, whoami)
         self.callback = callback
         self.completion = ReactorCompletion(reactor)
     def invoke(self, eventtime):
@@ -56,7 +61,9 @@ class ReactorCallback:
 class ReactorFileHandler:
     def __init__(self, fd, read_callback, write_callback):
         self.fd = fd
+        self.read_whoami = util.get_python_function_owner(read_callback)
         self.read_callback = read_callback
+        self.write_whoami = util.get_python_function_owner(write_callback)
         self.write_callback = write_callback
 
 class ReactorGreenlet(greenlet.greenlet):
@@ -154,8 +161,8 @@ class SelectReactor:
             return
         timer_handler.waketime = waketime
         self._next_timer = min(self._next_timer, waketime)
-    def register_timer(self, callback, waketime=NEVER):
-        timer_handler = ReactorTimer(callback, waketime)
+    def register_timer(self, callback, waketime=NEVER, whoami=None):
+        timer_handler = ReactorTimer(callback, waketime, whoami)
         timers = list(self._timers)
         timers.append(timer_handler)
         self._timers = timers
@@ -245,7 +252,7 @@ class SelectReactor:
             # so switch to _check_timers (via g.timer.callback return)
             return self._g_dispatch.switch(waketime)
         # Pausing the dispatch greenlet - setup timer to resume this greenlet
-        g.timer = self.register_timer(g.switch, waketime)
+        g.timer = self.register_timer(g.switch, waketime, "unpause")
         self._next_timer = self.NOW
         if self._cached_dispatch_greenlets:
             # Switch to _end_greenlet to activate cached dispatch greenlet
