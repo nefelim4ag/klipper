@@ -209,9 +209,7 @@ class TemperatureProbe:
                 "Estimated Total Thermal Expansion: %.6f"
                 % (self.total_expansion,)
             )
-        self.last_zero_pos = mpresult.bed_z
-        toolhead = self.printer.lookup_object("toolhead")
-        tool_zero_z = toolhead.get_position()[2]
+        self.last_zero_pos = tool_zero_z = mpresult.bed_z
         try:
             last_temp = self._collect_sample(mpresult, tool_zero_z)
         except Exception:
