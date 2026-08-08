@@ -259,7 +259,9 @@ class Homing:
         probe_session.run_probe(gcmd)
         ppos = probe_session.pull_probed_results()[0]
         # Update toolhead position
+        logging.info("ppos: %s" % (repr(ppos)))
         curpos = self.toolhead.get_position()
+        logging.info("curpos: %s" % (repr(curpos)))
         curpos[2] -= ppos.bed_z
         self.toolhead.set_position(curpos)
     def _do_home_z_via_probe(self, rails, forcepos, movepos):
