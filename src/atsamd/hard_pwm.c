@@ -47,11 +47,11 @@ static const struct gpio_pwm_info pwm_regs[] = {
     { GPIO('B', 31), 'E', 0, 1 },
 };
 
-#define MAX_PWM 255
+#define MAX_PWM (1<<15)
 DECL_CONSTANT("PWM_MAX", MAX_PWM);
 
 struct gpio_pwm
-gpio_pwm_setup(uint8_t pin, uint32_t cycle_time, uint8_t val)
+gpio_pwm_setup(uint8_t pin, uint32_t cycle_time, uint32_t val)
 {
     // Find pin in pwm_regs table
     const struct gpio_pwm_info *p = pwm_regs;
@@ -64,19 +64,14 @@ gpio_pwm_setup(uint8_t pin, uint32_t cycle_time, uint8_t val)
 
     // Enable timer clock
     enable_pclock(tcc_info[p->tcc].pclk_id, tcc_info[p->tcc].pm_id);
-
-    // Map cycle_time to pwm clock divisor
-    uint32_t cs;
-    switch (cycle_time) {
-    case                      0 ...      (1+2) * MAX_PWM / 2 - 1: cs = 0; break;
-    case    (1+2) * MAX_PWM / 2 ...      (2+4) * MAX_PWM / 2 - 1: cs = 1; break;
-    case    (2+4) * MAX_PWM / 2 ...      (4+8) * MAX_PWM / 2 - 1: cs = 2; break;
-    case    (4+8) * MAX_PWM / 2 ...     (8+16) * MAX_PWM / 2 - 1: cs = 3; break;
-    case   (8+16) * MAX_PWM / 2 ...    (16+64) * MAX_PWM / 2 - 1: cs = 4; break;
-    case  (16+64) * MAX_PWM / 2 ...   (64+256) * MAX_PWM / 2 - 1: cs = 5; break;
-    case (64+256) * MAX_PWM / 2 ... (256+1024) * MAX_PWM / 2 - 1: cs = 6; break;
-    default:                                                      cs = 7; break;
+    uint32_t cs = 0, period_ticks = cycle_time;
+    uint32_t prescaler_div[] = { 1, 2, 4, 8, 16, 64, 256, 1024 };
+    while (period_ticks > MAX_PWM && cs < ARRAY_SIZE(prescaler_div) - 1) {
+        cs++;
+        period_ticks = DIV_ROUND_CLOSEST(cycle_time, prescaler_div[cs]);
     }
+    if (period_ticks > MAX_PWM)
+        period_ticks = MAX_PWM;
     uint32_t ctrla = TCC_CTRLA_ENABLE | TCC_CTRLA_PRESCALER(cs);
 
     // Enable timer
@@ -87,17 +82,18 @@ gpio_pwm_setup(uint8_t pin, uint32_t cycle_time, uint8_t val)
             shutdown("PWM already programmed at different speed");
         tcc->CTRLA.reg = ctrla & ~TCC_CTRLA_ENABLE;
         tcc->WAVE.reg = TCC_WAVE_WAVEGEN_NPWM;
-        tcc->PER.reg = MAX_PWM;
+        tcc->PER.reg = period_ticks - 1;
         tcc->CTRLA.reg = ctrla;
     }
 
     // Set initial value
     struct gpio_pwm g = (struct gpio_pwm) {
 #if CONFIG_MACH_SAMD21
-        (void*)&tcc->CCB[p->channel].reg
+        .reg = (void*)&tcc->CCB[p->channel].reg,
 #elif CONFIG_MACH_SAMC21
-        (void*)&tcc->CCBUF[p->channel].reg
+        .reg = (void*)&tcc->CCBUF[p->channel].reg,
 #endif
+        .hwpwm_ticks = period_ticks,
     };
     gpio_pwm_write(g, val);
 
@@ -108,7 +104,8 @@ gpio_pwm_setup(uint8_t pin, uint32_t cycle_time, uint8_t val)
 }
 
 void
-gpio_pwm_write(struct gpio_pwm g, uint8_t val)
+gpio_pwm_write(struct gpio_pwm g, uint32_t val)
 {
-    *(volatile uint32_t*)g.reg = val;
+    uint32_t r = DIV_ROUND_CLOSEST(val * g.hwpwm_ticks, MAX_PWM);
+    *(volatile uint32_t*)g.reg = r;
 }

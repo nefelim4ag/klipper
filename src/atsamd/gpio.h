@@ -23,9 +23,10 @@ uint8_t gpio_in_read(struct gpio_in g);
 
 struct gpio_pwm {
     void *reg;
+    uint32_t hwpwm_ticks;
 };
-struct gpio_pwm gpio_pwm_setup(uint8_t pin, uint32_t cycle_time, uint8_t val);
-void gpio_pwm_write(struct gpio_pwm g, uint8_t val);
+struct gpio_pwm gpio_pwm_setup(uint8_t pin, uint32_t cycle_time, uint32_t val);
+void gpio_pwm_write(struct gpio_pwm g, uint32_t val);
 
 struct gpio_adc {
     void *regs;
