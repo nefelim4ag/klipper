@@ -14,6 +14,7 @@
 
 #define FREQ_MAIN 48000000
 #define FREQ_32K 32768
+#define FREQ_XOSC 32000000
 
 // Configure a clock generator using a given source as input
 static inline void
@@ -55,6 +56,10 @@ get_pclock_frequency(uint32_t pclk_id)
 DECL_CONSTANT_STR("RESERVE_PINS_crystal", "PA0,PA1");
 #endif
 
+#if CONFIG_CLOCK_REF_X32M
+DECL_CONSTANT_STR("RESERVE_PINS_crystal", "PA14,PA15");
+#endif
+
 // Initialize the clocks using an external 32K crystal
 static void
 clock_init_32k(void)
@@ -72,6 +77,42 @@ clock_init_32k(void)
     uint32_t mul = DIV_ROUND_CLOSEST(FREQ_MAIN, FREQ_32K);
     SYSCTRL->DPLLRATIO.reg = SYSCTRL_DPLLRATIO_LDR(mul - 1);
     SYSCTRL->DPLLCTRLB.reg = SYSCTRL_DPLLCTRLB_LBYPASS;
+    SYSCTRL->DPLLCTRLA.reg = SYSCTRL_DPLLCTRLA_ENABLE;
+    uint32_t mask = SYSCTRL_DPLLSTATUS_CLKRDY | SYSCTRL_DPLLSTATUS_LOCK;
+    while ((SYSCTRL->DPLLSTATUS.reg & mask) != mask)
+        ;
+
+    // Switch main clock to DPLL clock
+    gen_clock(CLKGEN_MAIN, GCLK_GENCTRL_SRC_DPLL96M);
+}
+
+// Initialize the clock using an external MHz crystal
+static void
+clock_init_xosc(void)
+{
+    // Enable external crystal (XOSC)
+    uint32_t val = (SYSCTRL_XOSC_STARTUP(6) | SYSCTRL_XOSC_XTALEN
+                    | SYSCTRL_XOSC_GAIN(4) | SYSCTRL_XOSC_AMPGC);
+    SYSCTRL->XOSC.reg = val;
+    SYSCTRL->XOSC.reg = val | SYSCTRL_XOSC_ENABLE;
+    while (!(SYSCTRL->PCLKSR.reg & SYSCTRL_PCLKSR_XOSCRDY))
+        ;
+
+    // Pick div
+    uint32_t div = 1;
+    while (FREQ_XOSC / div > 2000000)
+        div *= 2;
+    uint32_t ref = FREQ_XOSC / div;
+    uint32_t mul = DIV_ROUND_CLOSEST(FREQ_MAIN, ref);
+
+    // Disable current clock
+    SYSCTRL->DPLLCTRLA.reg = 0;
+
+    // Generate 48Mhz clock on DPLL
+    SYSCTRL->DPLLRATIO.reg = SYSCTRL_DPLLRATIO_LDR(mul - 1);
+    SYSCTRL->DPLLCTRLB.reg = (SYSCTRL_DPLLCTRLB_REFCLK(1)
+                              | SYSCTRL_DPLLCTRLB_LBYPASS
+                              | SYSCTRL_DPLLCTRLB_DIV(div / 2 - 1));
     SYSCTRL->DPLLCTRLA.reg = SYSCTRL_DPLLCTRLA_ENABLE;
     uint32_t mask = SYSCTRL_DPLLSTATUS_CLKRDY | SYSCTRL_DPLLSTATUS_LOCK;
     while ((SYSCTRL->DPLLSTATUS.reg & mask) != mask)
@@ -123,6 +164,8 @@ SystemInit(void)
     // Init clocks
     if (CONFIG_CLOCK_REF_X32K)
         clock_init_32k();
+    else if (CONFIG_CLOCK_REF_X32M)
+        clock_init_xosc();
     else
         clock_init_internal();
 }
