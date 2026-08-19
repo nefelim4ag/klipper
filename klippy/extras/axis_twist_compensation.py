@@ -158,6 +158,9 @@ class Calibrater:
     def cmd_AXIS_TWIST_COMPENSATION_CALIBRATE(self, gcmd):
         self.gcmd = gcmd
         probe_x_offset, probe_y_offset, _ = self.probe.get_offsets(gcmd)
+        method = self.gcmd.get('METHOD', 'manual').lower()
+        if method == "tap":
+            probe_x_offset, probe_y_offset, _ = self.probe.get_offsets()
         sample_count = gcmd.get_int('SAMPLE_COUNT', DEFAULT_SAMPLE_COUNT)
         axis = gcmd.get('AXIS', 'X')
 
@@ -261,6 +264,17 @@ class Calibrater:
         speed = override_speed if override_speed is not None else speed
         toolhead.manual_move(target_coordinates, speed)
 
+    def _auto_probe(self, gcmd):
+        fo_params = dict(gcmd.get_command_parameters())
+        gcode = self.printer.lookup_object('gcode')
+        fo_gcmd = gcode.create_gcode_command("PROBE", "PROBE", fo_params)
+        pprobe = self.printer.lookup_object("probe")
+        probe_session = pprobe.start_probe_session(fo_gcmd)
+        probe_session.run_probe(fo_gcmd)
+        pos = probe_session.pull_probed_results()[0]
+        probe_session.end_probe_session()
+        return pos
+
     def _calibration(self, test_points, bed_points, interval):
         # begin the calibration process
         self.gcmd.respond_info("AXIS_TWIST_COMPENSATION_CALIBRATE: "
@@ -275,8 +289,14 @@ class Calibrater:
         self._move_helper((test_points[self.current_point_index][0],
                            test_points[self.current_point_index][1], None))
 
+        method = self.gcmd.get('METHOD', 'manual').lower()
+        gcmd = self.gcmd
+        if method == "tap":
+            gcode = self.printer.lookup_object('gcode')
+            # Overload single probe to default
+            gcmd = gcode.create_gcode_command("PROBE", "PROBE", {})
         # probe the point
-        pos = probe.run_single_probe(self.probe, self.gcmd)
+        pos = probe.run_single_probe(self.probe, gcmd)
         self.current_measured_z = pos.bed_z
 
         # horizontal_move_z (to prevent probe trigger or hitting bed)
@@ -285,11 +305,16 @@ class Calibrater:
         # move the nozzle over the position that was just probed
         self._move_helper((bed_points[self.current_point_index]))
 
+        callback = self._manual_probe_callback_factory(
+            test_points, bed_points, interval)
+
+        if method == "tap":
+            mpresult = self._auto_probe(self.gcmd)
+            callback(mpresult)
+            return
+
         # start the manual (nozzle) probe
-        manual_probe.ManualProbeHelper(
-            self.printer, self.gcmd,
-            self._manual_probe_callback_factory(
-                test_points, bed_points, interval))
+        manual_probe.ManualProbeHelper(self.printer, self.gcmd, callback)
 
     def _manual_probe_callback_factory(self, test_points,
         bed_points, interval):
