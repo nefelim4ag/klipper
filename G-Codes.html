@@ -6009,7 +6009,8 @@ default probes. If <code>METHOD=tap</code> is specified then the command instead
 applies the change to <code>tap_z_offset</code> so that future <code>tap</code> probes are
 updated to use the current Z G-Code offset.</p>
 <h4 id="probe_eddy_current_calibrate">PROBE_EDDY_CURRENT_CALIBRATE<a class="headerlink" href="#probe_eddy_current_calibrate" title="Permanent link">&para;</a></h4>
-<p><code>PROBE_EDDY_CURRENT_CALIBRATE CHIP=&lt;config_name&gt;</code>: This starts a tool
+<p><code>PROBE_EDDY_CURRENT_CALIBRATE CHIP=&lt;config_name&gt; [MANUAL_METHOD=manual]</code>:
+This starts a tool
 that calibrates the sensor resonance frequencies to corresponding Z
 heights. The tool will take a couple of minutes to complete. After
 completion, use the SAVE_CONFIG command to store the results in the
