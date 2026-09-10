@@ -238,7 +238,7 @@ class LDC1612:
         self.set_reg(REG_DRIVE_CURRENT0, self.dccal.get_drive_current() << 11)
         self.set_reg(REG_DRIVE_CURRENT1, 1 << 11)
         # Start bulk reading
-        rest_ticks = self.mcu.seconds_to_clock(0.5 / self.data_rate)
+        rest_ticks = self.mcu.seconds_to_clock(0.25 / self.data_rate)
         self.query_ldc1612_cmd.send([self.oid, rest_ticks])
         logging.info("LDC1612 starting '%s' measurements", self.name)
         # Initialize clock tracking
