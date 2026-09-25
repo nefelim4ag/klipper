@@ -342,47 +342,30 @@ class EddyTapCalibration:
                                desc=self.cmd_TAP_CALIBRATE_help)
     def _analyze_main_calibration(self):
         freqs, zpos = self._calibration.get_calibration()
-        data = [(z, f) for f, z in zip(freqs, zpos) if z <= 0.750]
-        n = float(len(data))
-        sf = sum(f for z, f in data)
-        def linfit(b):
-            # For fixed b, f = C + A*e with e = exp(-b*z) is linear regression
-            es = [math.exp(-b * z) for z, f in data]
-            se = sum(es)
-            see = sum(e * e for e in es)
-            sef = sum(e * f for e, (z, f) in zip(es, data))
-            A = (n * sef - se * sf) / (n * see - se * se)
-            C = (sf - A * se) / n
-            sse = sum((C + A * e - f) ** 2 for e, (z, f) in zip(es, data))
-            return sse, C, A
-        g = 0.61
-        lo, hi = 0.01, 20.
-        for _ in range(60):
-            diff = (hi - lo)
-            m1 = hi - g * diff
-            m2 = lo + g * diff
-            if linfit(m1)[0] < linfit(m2)[0]:
-                hi = m2
-            else:
-                lo = m1
-        b = .5 * (lo + hi)
-        C, A = linfit(b)[1:]
-        z = .0
-        slope = -b * A * math.exp(-b * z)
-        return C, A, b, slope
+        if len(freqs) < 2:
+            return None
+        # Find best fit for: freq = c0 + c1*z + c2*z*z + c3*z*z*z
+        eqs = []
+        ans = []
+        for freq, z in zip(freqs, zpos):
+            if z <= 0.750:
+                ans.append([freq])
+                eqs.append([1., z, z*z, z*z*z])
+        return mathutil.solve_linear_equations(eqs, ans)
     def _describe_main_calibration(self, coeffs):
         if coeffs is None:
             return ["Main calibration data not available.", ""]
-        msg = ("Calibration: C=%.3f A=%.3f b=%.6f, slope=%.3f" % coeffs)
+        msg = ("Calibration: f=%.3f s=%.3f q=%.3f q2=%.3f"
+               % (coeffs[0][0], coeffs[1][0], coeffs[2][0], coeffs[3][0]))
         return [msg, ""]
     def _describe_last_tap(self, last_tap):
         if last_tap is None:
             return ["Run tap probe for last tap analysis."]
         status, depress_dist, coeffs = last_tap
-        z_contact, freq_contact, depress_slope, slope, slope2, best_b = coeffs
+        z_contact, freq_contact, depress_slope, slope, slope2, slope3 = coeffs
         contact_slope_delta = depress_slope - slope
-        m1 = ("Last tap: z=%.6f f=%.3f s=%.3f q=%.3f b=%.3f"
-              % (z_contact, freq_contact, slope, slope2, best_b))
+        m1 = ("Last tap: z=%.6f f=%.3f s=%.3f q=%.3f q2=%.3f"
+              % (z_contact, freq_contact, slope, slope2, slope3))
         m2 = ("  depress_dist=%.6f depress_slope=%.3f"
               % (depress_dist, depress_slope))
         m3 = ("  contact_slope_delta=%.3f" % (contact_slope_delta,))
@@ -431,14 +414,14 @@ class EddyTapCalibration:
             if mc_coeffs is None:
                 raise gcmd.error(
                     "Must complete PROBE_EDDY_CURRENT_CALIBRATE first")
-            self._try_tap(gcmd, mc_coeffs[3] * -0.15)
+            self._try_tap(gcmd, mc_coeffs[1][0] * -0.15)
         elif tap_test == 'refine':
             # Attempt tap based on change in slope observed during last tap
             self._refine_tap_threshold = None
             if last_tap is None or last_tap[0] != "success":
                 raise gcmd.error("Must complete valid 'tap' probe first")
             status, depress_dist, coeffs = last_tap
-            z_contact, freq_contact, depress_slope, slope, slope2, _ = coeffs
+            z_contact, freq_contact, depress_slope, slope, slope2, s3 = coeffs
             contact_slope_delta = depress_slope - slope
             try_tap_threshold = contact_slope_delta * 0.20
             max_safe_threshold = contact_slope_delta * 0.90
@@ -572,173 +555,173 @@ def probe_results_from_avg(measures, toolhead_pos, calibration, offsets):
 # Data fitting for "tap"
 ######################################################################
 
-import bisect, math, sys
-
-######################################################################
-# Data fitting for "tap" -- exponential free-air variant
-######################################################################
-
-# Model:
-#   z <= z_contact:  freq = C + A'*ezc_factor + depress_slope*(z - z_contact)
-#   z >= z_contact:  freq = C + A'*exp(-b*z)
-# where ezc_factor = exp(-b*z_contact).  A' = A*exp(b*z_contact) is a
-# reparameterized amplitude chosen so the free-air basis column exp(-b*z)
-# does NOT depend on z_contact -- only on b and the sample's own z. This
-# preserves the same "cache sums, slice by bisect index" trick the
-# original polynomial fit used, plus an outer search over b.
-#
-# b is not fixed: every call re-derives it, searching a narrow band
-# around a supplied prior. Callers should pass in the b found on the
-# previous successful tap (it should only drift slowly with
-# temperature/position), falling back to a calibration-derived value
-# on the first call.
-class TapExpBestFit:
+# Given a list of (frequency, z) pairs, find the coefficients
+# z_contact, freq_contact, depress_slope, slope, and slope2 that best
+# fit the data to the formulas `frequency = freq_contact +
+# depress_slope*(z-z_contact)` when z<=z_contact and `frequency =
+# freq_contact + slope*(z-z_contact) + slope2*(z-z_contact)*(z-z_contact)`
+# when z>=z_contact.  This implements a form of non-linear least
+# squares.
+class TapBestFit:
     def __init__(self):
-        self._le_sums_cache = {}   # keyed by num_le -- valid for ANY b
-        self._gt_sums_cache = {}   # keyed by num_le -- valid only for the CURRENT b
-
-    def _build_ls_matrix(self, samples, est_z_contact, b):
-        # Reference (unoptimized) version, for clarity / cross-checking.
-        eqs = []
-        ans = []
-        ezc_factor = math.exp(-b*est_z_contact)
-        for step_z, sensor_freq in samples:
-            ans.append([sensor_freq])
+        self._least_squares_cache = {}
+    def _build_ls_matrix(self, samples, est_z_contact):
+        # The function here is only a reference for the optimized version below
+        len_samples = len(samples)
+        eqs = [[0.] * 5 for i in range(len_samples)]
+        ans = [[0.] for i in range(len_samples)]
+        for i, (step_z, sensor_freq) in enumerate(samples):
+            ans[i][0] = sensor_freq
+            eq = eqs[i]
+            eq[0] = 1.
             if step_z <= est_z_contact:
-                eqs.append([1., ezc_factor, step_z - est_z_contact])
+                # 1*c0 + (z-ezc)*c1 + ezc*c2 + ezc*ezc*c3 = freq
+                eq[1] = step_z - est_z_contact
+                eq[2] = est_z_contact
+                eq[3] = est_z_contact * est_z_contact
+                eq[4] = est_z_contact * est_z_contact * est_z_contact
             else:
-                eqs.append([1., math.exp(-b*step_z), 0.])
+                # 1*c0 + 0*c1 + z*c2 + z*z*c3 = freq
+                eq[1] = 0.
+                eq[2] = step_z
+                eq[3] = step_z * step_z
+                eq[4] = step_z * step_z * step_z
         eqst = mathutil.mat_transp(eqs)
         eqst_eqs = mathutil.mat_mat_mul(eqst, eqs)
         eqst_ans = mathutil.mat_mat_mul(eqst, ans)
         return eqst_eqs, eqst_ans
-
-    def _build_le_sums(self, samples, num_le):
-        # b-independent: depress-branch (z<=zc) raw sums
+    def _build_sums(self, samples, num_le):
         sum_le_z = sum_le_z2 = sum_le_freq = sum_le_freq_z = 0.
         for z, freq in samples[:num_le]:
             sum_le_z += z
-            sum_le_z2 += z*z
+            sum_le_z2 += z**2
             sum_le_freq += freq
             sum_le_freq_z += freq*z
-        return (sum_le_z, sum_le_z2, sum_le_freq, sum_le_freq_z)
-
-    def _build_gt_sums(self, samples, num_le, b):
-        # b-dependent: free-air branch (z>zc) sums of exp(-b*z)
-        sum_gt_e = sum_gt_e2 = sum_gt_freq = sum_gt_freq_e = 0.
+        sum_gt_z = sum_gt_z2 = sum_gt_z3 = sum_gt_z4 = 0.
+        sum_gt_z5 = sum_gt_z6 = 0.
+        sum_gt_freq = sum_gt_freq_z = sum_gt_freq_z2 = sum_gt_freq_z3 = 0.
         for z, freq in samples[num_le:]:
-            e = math.exp(-b*z)
-            sum_gt_e += e
-            sum_gt_e2 += e*e
+            sum_gt_z += z
+            sum_gt_z2 += z**2
+            sum_gt_z3 += z**3
+            sum_gt_z4 += z**4
+            sum_gt_z5 += z**5
+            sum_gt_z6 += z**6
             sum_gt_freq += freq
-            sum_gt_freq_e += freq*e
-        return (sum_gt_e, sum_gt_e2, sum_gt_freq, sum_gt_freq_e)
-
-    def _build_ls_matrix_opt(self, samples, est_z_contact, b):
+            sum_gt_freq_z += freq*z
+            sum_gt_freq_z2 += freq * z**2
+            sum_gt_freq_z3 += freq * z**3
+        return (sum_le_z, sum_le_z2, sum_le_freq, sum_le_freq_z,
+                sum_gt_z, sum_gt_z2, sum_gt_z3, sum_gt_z4,
+                sum_gt_z5, sum_gt_z6,
+                sum_gt_freq, sum_gt_freq_z, sum_gt_freq_z2, sum_gt_freq_z3)
+    def _build_ls_matrix_opt(self, samples, est_z_contact):
+        # This function is an optimized version of _build_ls_matrix()
         num_le = bisect.bisect(samples, (est_z_contact, sys.float_info.max))
-        le_sums = self._le_sums_cache.get(num_le)
-        if le_sums is None:
-            le_sums = self._build_le_sums(samples, num_le)
-            self._le_sums_cache[num_le] = le_sums
-        (sum_le_z, sum_le_z2, sum_le_freq, sum_le_freq_z) = le_sums
-
-        gt_sums = self._gt_sums_cache.get(num_le)
-        if gt_sums is None:
-            gt_sums = self._build_gt_sums(samples, num_le, b)
-            self._gt_sums_cache[num_le] = gt_sums
-        (sum_gt_e, sum_gt_e2, sum_gt_freq, sum_gt_freq_e) = gt_sums
-
+        # Check for previously calculated raw freq/z counters
+        sums = self._least_squares_cache.get(num_le)
+        if sums is None:
+            sums = self._build_sums(samples, num_le)
+            self._least_squares_cache[num_le] = sums
+        (sum_le_z, sum_le_z2, sum_le_freq, sum_le_freq_z,
+         sum_gt_z, sum_gt_z2, sum_gt_z3, sum_gt_z4,
+         sum_gt_z5, sum_gt_z6,
+         sum_gt_freq, sum_gt_freq_z, sum_gt_freq_z2, sum_gt_freq_z3) = sums
         num_samples = len(samples)
         ezc = est_z_contact
-        ezc_factor = math.exp(-b*ezc)
-        sum_le_dz = sum_le_z - num_le*ezc  # sum of (z-zc) over depress rows
-
-        eqst_eqs = [[0.]*3 for _ in range(3)]
+        ezc2 = ezc**2
+        ezc3 = ezc**3
+        ezc4 = ezc**4
+        ezc5 = ezc**5
+        ezc6 = ezc**6
+        # Build matrices for least squares evaluation
+        eqst_eqs = [[0.] * 5 for i in range(5)]
         eqst_eqs[0][0] = num_samples
-        eqst_eqs[0][1] = eqst_eqs[1][0] = num_le*ezc_factor + sum_gt_e
-        eqst_eqs[0][2] = eqst_eqs[2][0] = sum_le_dz
-        eqst_eqs[1][1] = num_le*ezc_factor*ezc_factor + sum_gt_e2
-        eqst_eqs[1][2] = eqst_eqs[2][1] = ezc_factor * sum_le_dz
-        eqst_eqs[2][2] = sum_le_z2 - 2*ezc*sum_le_z + num_le*ezc*ezc
-
-        eqst_ans = [[0.] for _ in range(3)]
+        eqst_eqs[1][1] = sum_le_z2 - 2*ezc*sum_le_z + num_le*ezc2
+        eqst_eqs[2][2] = sum_gt_z2 + num_le*ezc2
+        eqst_eqs[3][3] = sum_gt_z4 + num_le*ezc4
+        eqst_eqs[4][4] = sum_gt_z6 + num_le*ezc6
+        eqst_eqs[0][1] = eqst_eqs[1][0] = sum_le_z - num_le*ezc
+        eqst_eqs[0][2] = eqst_eqs[2][0] = sum_gt_z + num_le*ezc
+        eqst_eqs[0][3] = eqst_eqs[3][0] = sum_gt_z2 + num_le*ezc2
+        eqst_eqs[0][4] = eqst_eqs[4][0] = sum_gt_z3 + num_le*ezc3
+        eqst_eqs[2][3] = eqst_eqs[3][2] = sum_gt_z3 + num_le*ezc3
+        eqst_eqs[2][4] = eqst_eqs[4][2] = sum_gt_z4 + num_le*ezc4
+        eqst_eqs[3][4] = eqst_eqs[4][3] = sum_gt_z5 + num_le*ezc5
+        eqst_eqs[2][1] = eqst_eqs[1][2] = ezc * eqst_eqs[0][1]
+        eqst_eqs[3][1] = eqst_eqs[1][3] = ezc2 * eqst_eqs[0][1]
+        eqst_eqs[4][1] = eqst_eqs[1][4] = ezc3 * eqst_eqs[0][1]
+        eqst_ans = [[0.] for i in range(5)]
         eqst_ans[0][0] = sum_le_freq + sum_gt_freq
-        eqst_ans[1][0] = ezc_factor*sum_le_freq + sum_gt_freq_e
-        eqst_ans[2][0] = sum_le_freq_z - ezc*sum_le_freq
+        eqst_ans[1][0] = sum_le_freq_z - ezc*sum_le_freq
+        eqst_ans[2][0] = sum_gt_freq_z + ezc*sum_le_freq
+        eqst_ans[3][0] = sum_gt_freq_z2 + ezc2 * sum_le_freq
+        eqst_ans[4][0] = sum_gt_freq_z3 + ezc3 * sum_le_freq
         return eqst_eqs, eqst_ans
-
-    def _calc_least_squares(self, samples, est_z_contact, b):
-        eqst_eqs, eqst_ans = self._build_ls_matrix_opt(samples, est_z_contact, b)
+    def _calc_least_squares(self, samples, est_z_contact):
+        eqst_eqs, eqst_ans = self._build_ls_matrix_opt(samples, est_z_contact)
         coeffs = mathutil.gaussian_solve(eqst_eqs, eqst_ans)
+        if coeffs is not None and coeffs[3][0] < 0.:
+            # z**2 factor can't be negative - retry using only linear
+            alt_eqst_eqs = [ee[:3] for ee in eqst_eqs[:3]]
+            alt_eqst_ans = eqst_ans[:3]
+            coeffs = mathutil.gaussian_solve(alt_eqst_eqs, alt_eqst_ans)
+            if coeffs is not None:
+                coeffs = coeffs + [[0.], [0.]]
         if coeffs is None:
-            return sys.float_info.max, [[0.], [0.], [0.]]
+            return sys.float_info.max, [[0.]] * 5
         rel_err = -sum([c[0]*a[0] for c, a in zip(coeffs, eqst_ans)])
         return rel_err, coeffs
-
-    def _search_zc(self, samples, b, min_z, max_z):
-        self._gt_sums_cache = {}
-        best_z = min_z
-        best_err = sys.float_info.max
-        best_coeffs = [[0.], [0.], [0.]]
-        lo, hi = min_z, max_z
-        while hi - lo > 0.000050:
-            mid_z = (lo + hi) * .5
-            if best_z < mid_z:
-                guess_z = (best_z + hi)*.5
-            else:
-                guess_z = (lo + best_z)*.5
-            guess_err, coeffs = self._calc_least_squares(samples, guess_z, b)
-            if guess_err < best_err:
-                if guess_z > best_z:
-                    lo = best_z
-                else:
-                    hi = best_z
-                best_z, best_err, best_coeffs = guess_z, guess_err, coeffs
-            else:
-                if guess_z > best_z:
-                    hi = guess_z
-                else: lo = guess_z
-        return best_z, best_err, best_coeffs
-
-    def find_best_fit(self, data, b_prior, b_search_frac=0.4, b_iter=14):
-        self._le_sums_cache.clear()
-        self._gt_sums_cache.clear()
+    def find_best_fit(self, data):
+        #for d in data:
+        #    logging.info("sample: freq=%.3f z=%.6f", d[0], d[1][2])
+        self._least_squares_cache.clear()
+        # Change base of freq/z measurements to improve numerical stability
         base_z = .5 * (data[0][1][2] + data[-1][1][2])
         base_freq = .5 * (data[0][0] + data[-1][0])
         samples = [(d[1][2] - base_z, d[0] - base_freq) for d in data]
-        min_z, max_z = samples[0][0], samples[-1][0]
-
-        # Outer search over b, seeded from the caller's cached prior
-        b_lo, b_hi = b_prior*(1-b_search_frac), b_prior*(1+b_search_frac)
-        best_b = b_prior
-        best_zc, best_err, best_coeffs = self._search_zc(samples, best_b, min_z, max_z)
-        lo, hi = b_lo, b_hi
-        n = 0
-        while hi - lo > b_prior*0.0005 and n < b_iter:
-            n += 1
-            mid_b = (lo + hi) * .5
-            guess_b = (best_b + hi)*.5 if best_b < mid_b else (lo + best_b)*.5
-            zc, err, coeffs = self._search_zc(samples, guess_b, min_z, max_z)
-            if err < best_err:
-                if guess_b > best_b: lo = best_b
-                else: hi = best_b
-                best_b, best_zc, best_err, best_coeffs = guess_b, zc, err, coeffs
+        # Run least squares with various z values to reduce residual error
+        min_z = best_z = samples[0][0]
+        max_z = samples[-1][0]
+        best_err = sys.float_info.max
+        best_coeffs = [0., 0., 0., 0., 0.]
+        while max_z - min_z > 0.000050:
+            # Select z value to check
+            mid_z = (min_z + max_z) * .5
+            if best_z < mid_z:
+                guess_z = (best_z + max_z) * .5
             else:
-                if guess_b > best_b: hi = guess_b
-                else: lo = guess_b
-
-        self._le_sums_cache.clear()
-        self._gt_sums_cache.clear()
-
-        C, Ap, depress_slope = [v[0] for v in best_coeffs]
-        z_contact = base_z + best_zc
-        ezc_factor = math.exp(-best_b*best_zc)
-        A_physical = Ap * ezc_factor
-        freq_contact = base_freq + C + A_physical
-        slope = -best_b * A_physical          # d/dz of free-air branch at zc
-        slope2 = best_b*best_b * A_physical   # curvature at zc
+                guess_z = (min_z + best_z) * .5
+            # Calculate least squares error for given z
+            guess_err, coeffs = self._calc_least_squares(samples, guess_z)
+            # Update search bounds
+            if guess_err < best_err:
+                if guess_z > best_z:
+                    min_z = best_z
+                else:
+                    max_z = best_z
+                best_z = guess_z
+                best_err = guess_err
+                best_coeffs = coeffs
+            else:
+                if guess_z > best_z:
+                    max_z = guess_z
+                else:
+                    min_z = guess_z
+        self._least_squares_cache.clear()
+        # Return to original freq/z measurement base
+        bc = [v[0] for v in best_coeffs]
+        z_contact = base_z + best_z
+        freq_contact = (base_freq + bc[0] + best_z*bc[2]
+                        + best_z*best_z*bc[3] + best_z**3*bc[4])
+        depress_slope = bc[1]
+        slope = bc[2] + 2.*best_z*bc[3] + 3.*best_z*best_z*bc[4]
+        slope2 = bc[3] + 3.*best_z*bc[4]
+        slope3 = bc[4]
+        #logging.info("probe_analysis: coeffs=%s",
+        #             (z_contact, freq_contact, depress_slope, slope, slope2))
         return (z_contact, freq_contact, depress_slope, slope, slope2,
-                best_b)
+                slope3)
 
 
 ######################################################################
@@ -819,7 +802,6 @@ class EddyTap:
         self._current_tap_threshold = 0.
         self._setup_tap()
         self._last_tap = None
-        self._last_b = 0.4
     # Setup for "tap" probe request
     def _setup_tap(self):
         # Create sos filter "design"
@@ -894,10 +876,9 @@ class EddyTap:
             self._error_detect("insufficient lift (%.6f vs %.6f)"
                                % (max_z - min_z, 0.350))
         # Find best fit for extracted measurements
-        tap_fit = TapExpBestFit()
-        coeffs = tap_fit.find_best_fit(data, self._last_b)
-        z_contact, freq_contact, depress_slope, slope, slope2, best_b = coeffs
-        self._last_b = best_b
+        tap_fit = TapBestFit()
+        coeffs = tap_fit.find_best_fit(data)
+        z_contact, freq_contact, depress_slope, slope, slope2, slope3 = coeffs
         self._last_tap = ("fail", z_contact - min_z, coeffs)
         reactor.pause(0.)
         sps = self._sensor_helper.get_samples_per_second()
