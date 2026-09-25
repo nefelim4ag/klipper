@@ -344,28 +344,28 @@ class EddyTapCalibration:
         freqs, zpos = self._calibration.get_calibration()
         if len(freqs) < 2:
             return None
-        # Find best fit for: freq = c0 + c1*z + c2*z*z + c3*z*z*z
+        # Find best fit for: freq = c0 + c1*z + c2*z*z
         eqs = []
         ans = []
         for freq, z in zip(freqs, zpos):
             if z <= 0.750:
                 ans.append([freq])
-                eqs.append([1., z, z*z, z*z*z])
+                eqs.append([1., z, z*z])
         return mathutil.solve_linear_equations(eqs, ans)
     def _describe_main_calibration(self, coeffs):
         if coeffs is None:
             return ["Main calibration data not available.", ""]
-        msg = ("Calibration: f=%.3f s=%.3f q=%.3f q2=%.3f"
-               % (coeffs[0][0], coeffs[1][0], coeffs[2][0], coeffs[3][0]))
+        msg = ("Calibration: f=%.3f s=%.3f q=%.3f"
+               % (coeffs[0][0], coeffs[1][0], coeffs[2][0]))
         return [msg, ""]
     def _describe_last_tap(self, last_tap):
         if last_tap is None:
             return ["Run tap probe for last tap analysis."]
         status, depress_dist, coeffs = last_tap
-        z_contact, freq_contact, depress_slope, slope, slope2, slope3 = coeffs
+        z_contact, freq_contact, depress_slope, slope, slope2 = coeffs
         contact_slope_delta = depress_slope - slope
-        m1 = ("Last tap: z=%.6f f=%.3f s=%.3f q=%.3f q2=%.3f"
-              % (z_contact, freq_contact, slope, slope2, slope3))
+        m1 = ("Last tap: z=%.6f f=%.3f s=%.3f q=%.3f"
+              % (z_contact, freq_contact, slope, slope2))
         m2 = ("  depress_dist=%.6f depress_slope=%.3f"
               % (depress_dist, depress_slope))
         m3 = ("  contact_slope_delta=%.3f" % (contact_slope_delta,))
@@ -421,7 +421,7 @@ class EddyTapCalibration:
             if last_tap is None or last_tap[0] != "success":
                 raise gcmd.error("Must complete valid 'tap' probe first")
             status, depress_dist, coeffs = last_tap
-            z_contact, freq_contact, depress_slope, slope, slope2, s3 = coeffs
+            z_contact, freq_contact, depress_slope, slope, slope2 = coeffs
             contact_slope_delta = depress_slope - slope
             try_tap_threshold = contact_slope_delta * 0.20
             max_safe_threshold = contact_slope_delta * 0.90
@@ -568,7 +568,7 @@ class TapBestFit:
     def _build_ls_matrix(self, samples, est_z_contact):
         # The function here is only a reference for the optimized version below
         len_samples = len(samples)
-        eqs = [[0.] * 5 for i in range(len_samples)]
+        eqs = [[0.] * 4 for i in range(len_samples)]
         ans = [[0.] for i in range(len_samples)]
         for i, (step_z, sensor_freq) in enumerate(samples):
             ans[i][0] = sensor_freq
@@ -579,13 +579,11 @@ class TapBestFit:
                 eq[1] = step_z - est_z_contact
                 eq[2] = est_z_contact
                 eq[3] = est_z_contact * est_z_contact
-                eq[4] = est_z_contact * est_z_contact * est_z_contact
             else:
                 # 1*c0 + 0*c1 + z*c2 + z*z*c3 = freq
                 eq[1] = 0.
                 eq[2] = step_z
                 eq[3] = step_z * step_z
-                eq[4] = step_z * step_z * step_z
         eqst = mathutil.mat_transp(eqs)
         eqst_eqs = mathutil.mat_mat_mul(eqst, eqs)
         eqst_ans = mathutil.mat_mat_mul(eqst, ans)
@@ -598,23 +596,18 @@ class TapBestFit:
             sum_le_freq += freq
             sum_le_freq_z += freq*z
         sum_gt_z = sum_gt_z2 = sum_gt_z3 = sum_gt_z4 = 0.
-        sum_gt_z5 = sum_gt_z6 = 0.
-        sum_gt_freq = sum_gt_freq_z = sum_gt_freq_z2 = sum_gt_freq_z3 = 0.
+        sum_gt_freq = sum_gt_freq_z = sum_gt_freq_z2 = 0.
         for z, freq in samples[num_le:]:
             sum_gt_z += z
             sum_gt_z2 += z**2
             sum_gt_z3 += z**3
             sum_gt_z4 += z**4
-            sum_gt_z5 += z**5
-            sum_gt_z6 += z**6
             sum_gt_freq += freq
             sum_gt_freq_z += freq*z
             sum_gt_freq_z2 += freq * z**2
-            sum_gt_freq_z3 += freq * z**3
         return (sum_le_z, sum_le_z2, sum_le_freq, sum_le_freq_z,
                 sum_gt_z, sum_gt_z2, sum_gt_z3, sum_gt_z4,
-                sum_gt_z5, sum_gt_z6,
-                sum_gt_freq, sum_gt_freq_z, sum_gt_freq_z2, sum_gt_freq_z3)
+                sum_gt_freq, sum_gt_freq_z, sum_gt_freq_z2)
     def _build_ls_matrix_opt(self, samples, est_z_contact):
         # This function is an optimized version of _build_ls_matrix()
         num_le = bisect.bisect(samples, (est_z_contact, sys.float_info.max))
@@ -625,38 +618,29 @@ class TapBestFit:
             self._least_squares_cache[num_le] = sums
         (sum_le_z, sum_le_z2, sum_le_freq, sum_le_freq_z,
          sum_gt_z, sum_gt_z2, sum_gt_z3, sum_gt_z4,
-         sum_gt_z5, sum_gt_z6,
-         sum_gt_freq, sum_gt_freq_z, sum_gt_freq_z2, sum_gt_freq_z3) = sums
+         sum_gt_freq, sum_gt_freq_z, sum_gt_freq_z2) = sums
         num_samples = len(samples)
         ezc = est_z_contact
         ezc2 = ezc**2
         ezc3 = ezc**3
         ezc4 = ezc**4
-        ezc5 = ezc**5
-        ezc6 = ezc**6
         # Build matrices for least squares evaluation
-        eqst_eqs = [[0.] * 5 for i in range(5)]
+        eqst_eqs = [[0.] * 4 for i in range(4)]
         eqst_eqs[0][0] = num_samples
         eqst_eqs[1][1] = sum_le_z2 - 2*ezc*sum_le_z + num_le*ezc2
         eqst_eqs[2][2] = sum_gt_z2 + num_le*ezc2
         eqst_eqs[3][3] = sum_gt_z4 + num_le*ezc4
-        eqst_eqs[4][4] = sum_gt_z6 + num_le*ezc6
         eqst_eqs[0][1] = eqst_eqs[1][0] = sum_le_z - num_le*ezc
         eqst_eqs[0][2] = eqst_eqs[2][0] = sum_gt_z + num_le*ezc
         eqst_eqs[0][3] = eqst_eqs[3][0] = sum_gt_z2 + num_le*ezc2
-        eqst_eqs[0][4] = eqst_eqs[4][0] = sum_gt_z3 + num_le*ezc3
         eqst_eqs[2][3] = eqst_eqs[3][2] = sum_gt_z3 + num_le*ezc3
-        eqst_eqs[2][4] = eqst_eqs[4][2] = sum_gt_z4 + num_le*ezc4
-        eqst_eqs[3][4] = eqst_eqs[4][3] = sum_gt_z5 + num_le*ezc5
         eqst_eqs[2][1] = eqst_eqs[1][2] = ezc * eqst_eqs[0][1]
         eqst_eqs[3][1] = eqst_eqs[1][3] = ezc2 * eqst_eqs[0][1]
-        eqst_eqs[4][1] = eqst_eqs[1][4] = ezc3 * eqst_eqs[0][1]
-        eqst_ans = [[0.] for i in range(5)]
+        eqst_ans = [[0.] for i in range(4)]
         eqst_ans[0][0] = sum_le_freq + sum_gt_freq
         eqst_ans[1][0] = sum_le_freq_z - ezc*sum_le_freq
         eqst_ans[2][0] = sum_gt_freq_z + ezc*sum_le_freq
         eqst_ans[3][0] = sum_gt_freq_z2 + ezc2 * sum_le_freq
-        eqst_ans[4][0] = sum_gt_freq_z3 + ezc3 * sum_le_freq
         return eqst_eqs, eqst_ans
     def _calc_least_squares(self, samples, est_z_contact):
         eqst_eqs, eqst_ans = self._build_ls_matrix_opt(samples, est_z_contact)
@@ -667,9 +651,9 @@ class TapBestFit:
             alt_eqst_ans = eqst_ans[:3]
             coeffs = mathutil.gaussian_solve(alt_eqst_eqs, alt_eqst_ans)
             if coeffs is not None:
-                coeffs = coeffs + [[0.], [0.]]
+                coeffs = coeffs + [[0.]]
         if coeffs is None:
-            return sys.float_info.max, [[0.]] * 5
+            return sys.float_info.max, [[0.]] * 4
         rel_err = -sum([c[0]*a[0] for c, a in zip(coeffs, eqst_ans)])
         return rel_err, coeffs
     def find_best_fit(self, data):
@@ -684,7 +668,7 @@ class TapBestFit:
         min_z = best_z = samples[0][0]
         max_z = samples[-1][0]
         best_err = sys.float_info.max
-        best_coeffs = [0., 0., 0., 0., 0.]
+        best_coeffs = [0., 0., 0., 0.]
         while max_z - min_z > 0.000050:
             # Select z value to check
             mid_z = (min_z + max_z) * .5
@@ -712,16 +696,13 @@ class TapBestFit:
         # Return to original freq/z measurement base
         bc = [v[0] for v in best_coeffs]
         z_contact = base_z + best_z
-        freq_contact = (base_freq + bc[0] + best_z*bc[2]
-                        + best_z*best_z*bc[3] + best_z**3*bc[4])
+        freq_contact = base_freq + bc[0] + best_z*bc[2] + best_z*best_z*bc[3]
         depress_slope = bc[1]
-        slope = bc[2] + 2.*best_z*bc[3] + 3.*best_z*best_z*bc[4]
-        slope2 = bc[3] + 3.*best_z*bc[4]
-        slope3 = bc[4]
+        slope = bc[2] + 2.*best_z*bc[3]
+        slope2 = bc[3]
         #logging.info("probe_analysis: coeffs=%s",
         #             (z_contact, freq_contact, depress_slope, slope, slope2))
-        return (z_contact, freq_contact, depress_slope, slope, slope2,
-                slope3)
+        return z_contact, freq_contact, depress_slope, slope, slope2
 
 
 ######################################################################
@@ -878,7 +859,7 @@ class EddyTap:
         # Find best fit for extracted measurements
         tap_fit = TapBestFit()
         coeffs = tap_fit.find_best_fit(data)
-        z_contact, freq_contact, depress_slope, slope, slope2, slope3 = coeffs
+        z_contact, freq_contact, depress_slope, slope, slope2 = coeffs
         self._last_tap = ("fail", z_contact - min_z, coeffs)
         reactor.pause(0.)
         sps = self._sensor_helper.get_samples_per_second()
