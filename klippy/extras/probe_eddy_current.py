@@ -147,7 +147,7 @@ class EddyCalibrationTool:
         toolhead.dwell(1.)
         self.calibration.note_z_calibration_start()
         # Move to each 40um position
-        max_z = 4.0
+        max_z = 12.0
         samp_dist = 0.040
         req_zpos = [i*samp_dist for i in range(int(max_z / samp_dist) + 1)]
         start_pos = toolhead.get_position()
