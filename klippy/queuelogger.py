@@ -49,6 +49,8 @@ class QueueListener(logging.handlers.TimedRotatingFileHandler):
         before = self.rolloverAt
         logging.handlers.TimedRotatingFileHandler.doRollover(self)
         if self.rolloverAt <= before:
+            self.emit(logging.makeLogRecord(
+                {'msg': "File exists", 'level': logging.INFO}))
             return
         lines = [self.rollover_info[name]
                  for name in sorted(self.rollover_info)]
