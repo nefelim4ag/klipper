@@ -94,18 +94,11 @@
  #error No known CAN device for configured MCU
 #endif
 
-// Transmit a packet
-int
-canhw_send(struct canbus_msg *msg)
+static struct canbus_msg tx_fifo[8];
+static volatile uint8_t tx_read, tx_write;
+
+static void load_mailbox(uint32_t tsr, struct canbus_msg *msg)
 {
-    uint32_t tsr = SOC_CAN->TSR;
-    if (!(tsr & (CAN_TSR_TME0|CAN_TSR_TME1|CAN_TSR_TME2))) {
-        // No space in transmit fifo - enable tx irq
-        irq_disable();
-        SOC_CAN->IER |= CAN_IER_TMEIE;
-        irq_enable();
-        return -1;
-    }
     int mbox = 2;
     if (tsr & CAN_TSR_TME0)
         mbox = 0;
@@ -128,7 +121,31 @@ canhw_send(struct canbus_msg *msg)
         tir = (msg->id & 0x7ff) << CAN_TI0R_STID_Pos;
     tir |= msg->id & CANMSG_ID_RTR ? CAN_TI0R_RTR : 0;
     mb->TIR = tir | CAN_TI0R_TXRQ;
-    return CANMSG_DATA_LEN(msg);
+}
+
+// Transmit a packet
+int
+canhw_send(struct canbus_msg *msg)
+{
+    if (tx_read == tx_write) {
+        uint32_t tsr = SOC_CAN->TSR;
+        if (tsr & (CAN_TSR_TME0|CAN_TSR_TME1|CAN_TSR_TME2)) {
+            load_mailbox(tsr, msg);
+            return CANMSG_DATA_LEN(msg);
+        }
+    }
+    int ret = -1;
+    // No space in transmit fifo - enable tx irq
+    if ((uint8_t)(tx_write - tx_read) < ARRAY_SIZE(tx_fifo)) {
+        tx_fifo[tx_write % ARRAY_SIZE(tx_fifo)] = *msg;
+        barrier();
+        tx_write++;
+        ret = CANMSG_DATA_LEN(msg);
+    }
+    irq_disable();
+    SOC_CAN->IER |= CAN_IER_TMEIE;
+    irq_enable();
+    return ret;
 }
 
 // Setup the receive packet filter
@@ -218,10 +235,16 @@ CAN_IRQHandler(void)
 
     // Check for transmit ready
     uint32_t ier = SOC_CAN->IER;
+    uint32_t tsr = SOC_CAN->TSR;
     if (ier & CAN_IER_TMEIE
-        && SOC_CAN->TSR & (CAN_TSR_RQCP0|CAN_TSR_RQCP1|CAN_TSR_RQCP2)) {
-        // Tx
-        SOC_CAN->IER = ier & ~CAN_IER_TMEIE;
+        && tsr & (CAN_TSR_RQCP0|CAN_TSR_RQCP1|CAN_TSR_RQCP2)) {
+        if (tx_read != tx_write) {
+            load_mailbox(tsr, &tx_fifo[tx_read % ARRAY_SIZE(tx_fifo)]);
+            tx_read++;
+        }
+        // Tx drained
+        if (tx_read == tx_write)
+            SOC_CAN->IER = ier & ~CAN_IER_TMEIE;
         canbus_notify_tx();
     }
 
