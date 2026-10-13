@@ -55,6 +55,16 @@ static GPIO_TypeDef * const digital_regs[] = {
 #endif
 };
 
+#ifdef __ARM_FEATURE_CLZ
+#define BIT_INDEX(b) ffs(b)
+#else
+static const uint8_t de_bruijn_tab[32] = {
+    0, 1, 28, 2, 29, 14, 24, 3, 30, 22, 20, 15, 25, 17, 4, 8,
+    31, 27, 13, 23, 21, 19, 16, 7, 26, 12, 18, 6, 11, 5, 10, 9
+};
+#define BIT_INDEX(b) (de_bruijn_tab[((uint32_t)(b) * 0x077CB531U) >> 27] + 1)
+#endif
+
 // Convert a register and bit location back to an integer pin identifier
 static int
 regs_to_pin(GPIO_TypeDef *regs, uint32_t bit)
@@ -62,7 +72,7 @@ regs_to_pin(GPIO_TypeDef *regs, uint32_t bit)
     int i;
     for (i=0; i<ARRAY_SIZE(digital_regs); i++)
         if (digital_regs[i] == regs)
-            return GPIO('A' + i, ffs(bit)-1);
+            return GPIO('A' + i, BIT_INDEX(bit)-1);
     return 0;
 }
 
