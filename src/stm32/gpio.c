@@ -69,6 +69,12 @@ static const uint8_t de_bruijn_tab[32] = {
 static int
 regs_to_pin(GPIO_TypeDef *regs, uint32_t bit)
 {
+    if (GPIOB_BASE - GPIOA_BASE == 0x400) {
+        uint32_t port = ((uintptr_t)regs - (uintptr_t)GPIOA) >> 10;
+        if (port < ARRAY_SIZE(digital_regs) && digital_regs[port] == regs)
+            return GPIO('A' + port, BIT_INDEX(bit)-1);
+        return 0;
+    }
     int i;
     for (i=0; i<ARRAY_SIZE(digital_regs); i++)
         if (digital_regs[i] == regs)
