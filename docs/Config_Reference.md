@@ -1812,6 +1812,39 @@ the [command reference](G-Codes.md#input_shaper).
 #   parameter requires no tuning and should not be changed.
 ```
 
+### [stepper_ripple_compensation]
+
+Stepper motor torque ripple compensation. Define a section for each
+stepper with a TMC driver, named after the stepper. Also see the
+[command reference](G-Codes.md#stepper_ripple_compensation).
+
+```
+[stepper_ripple_compensation stepper_x]
+#h1:
+#h2:
+#h3:
+#h4:
+#   The correction of the given harmonic of the electrical frequency.
+#   The first line is the positive and the second line the negative
+#   direction of motion of the stepper, a single line is used for both.
+#   Each line is "amplitude, phase" of the correction at low speed in
+#   microns and degrees, optionally followed by "amplitude, phase" at
+#   high speed. The speed_model gives the transition between the two,
+#   without it the low speed correction is used at all speeds. The
+#   default is no correction. For example:
+#     2.173, 67.8, 0.512, 40.3
+#     2.258, 100.9
+#speed_model:
+#   The transition between the low and the high speed correction as
+#   "f0, q, delay", fitted by the calibration. The default is none.
+#max_speed:
+#   The stepper speed in mm/s above which the correction fades out, it
+#   is zero at 10% above it. The calibration sets it to its MAX_SPEED.
+#   The default is no fade.
+#max_step_error: 0.0000025
+#   Dev. Do not edit.
+```
+
 ### [adxl345]
 
 Support for ADXL345 accelerometers. This support allows one to query
