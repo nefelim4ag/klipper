@@ -1568,6 +1568,22 @@ reset the homing information. Manually moving a disabled stepper may
 cause the machine to operate the motor outside of safe limits. This
 can lead to damage to axis components, hot ends, and print surface.
 
+### [stepper_ripple_compensation]
+
+The following commands are available when a
+[stepper_ripple_compensation config section](
+  Config_Reference.md#stepper_ripple_compensation) is enabled.
+
+#### SET_STEPPER_RIPPLE_COMPENSATION
+`SET_STEPPER_RIPPLE_COMPENSATION NAME=<config_name>
+[H1_NODES=<speed>,<amplitude>,<phase>,<amplitude>,<phase>/...] ...
+[H4_NODES=...] [ENABLE=[0|1]] [SAVE=[0|1]]`: Modify the speed nodes of
+the given harmonics. Nodes separated by "/", see the hN_nodes config
+option. An empty value removes the correction of the harmonic. Enable
+or disable the compensation with ENABLE. With SAVE=1 the current nodes
+are also stored for SAVE_CONFIG. Without parameters the current settings
+are reported.
+
 ### [temperature_fan]
 
 The following command is available when a
