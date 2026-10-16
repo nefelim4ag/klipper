@@ -113,6 +113,7 @@ class InputShaper:
                         AxisInputShaper('y', config),
                         AxisInputShaper('z', config)]
         self.input_shaper_stepper_kinematics = []
+        self.stepper_shapers = {}
         self.orig_stepper_kinematics = []
         # Register gcode commands
         gcode = self.printer.lookup_object('gcode')
@@ -137,6 +138,9 @@ class InputShaper:
         self._update_input_shaping(error=self.printer.config_error)
     def _get_input_shaper_stepper_kinematics(self, stepper):
         # Lookup stepper kinematics
+        is_sk = self.stepper_shapers.get(stepper.get_name())
+        if is_sk is not None:
+            return is_sk
         sk = stepper.get_stepper_kinematics()
         if sk in self.input_shaper_stepper_kinematics:
             return sk
@@ -149,6 +153,7 @@ class InputShaper:
             return None
         self.orig_stepper_kinematics.append(sk)
         self.input_shaper_stepper_kinematics.append(is_sk)
+        self.stepper_shapers[stepper.get_name()] = is_sk
         return is_sk
     def _update_kinematics(self):
         if self.toolhead is None:
@@ -164,6 +169,7 @@ class InputShaper:
             if is_sk is None:
                 continue
             ffi_lib.input_shaper_update_sk(is_sk)
+        self.printer.send_event("input_shaper:update_kinematics")
         motion_queuing = self.printer.lookup_object("motion_queuing")
         motion_queuing.check_step_generation_scan_windows()
     def _update_input_shaping(self, error=None):
@@ -182,6 +188,7 @@ class InputShaper:
                     continue
                 if not shaper.set_shaper_kinematics(is_sk):
                     failed_shapers.append(shaper)
+        self.printer.send_event("input_shaper:update_kinematics")
         motion_queuing = self.printer.lookup_object("motion_queuing")
         motion_queuing.check_step_generation_scan_windows()
         if failed_shapers:
