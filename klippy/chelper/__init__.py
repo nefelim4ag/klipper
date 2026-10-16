@@ -21,7 +21,8 @@ SOURCE_FILES = [
     'itersolve.c', 'trapq.c', 'pollreactor.c', 'msgblock.c', 'trdispatch.c',
     'kin_cartesian.c', 'kin_corexy.c', 'kin_corexz.c', 'kin_delta.c',
     'kin_deltesian.c', 'kin_polar.c', 'kin_rotary_delta.c', 'kin_winch.c',
-    'kin_extruder.c', 'kin_shaper.c', 'kin_idex.c', 'kin_generic.c'
+    'kin_extruder.c', 'kin_shaper.c', 'kin_idex.c', 'kin_generic.c',
+    'kin_stepper_ripple.c'
 ]
 DEST_LIB = "c_helper.so"
 OTHER_FILES = [
@@ -171,6 +172,19 @@ defs_kin_shaper = """
     struct stepper_kinematics * input_shaper_alloc(void);
 """
 
+defs_kin_stepper_ripple = """
+    void stepper_ripple_update_sk(struct stepper_kinematics *sk);
+    int stepper_ripple_set_sk(struct stepper_kinematics *sk
+        , struct stepper_kinematics *orig_sk
+        , struct stepper_kinematics *kin_sk);
+    void stepper_ripple_set_phase(struct stepper_kinematics *sk, double origin
+        , double period);
+    int stepper_ripple_set_nodes(struct stepper_kinematics *sk, int k
+        , int count, double speeds[], double pos_cos[], double pos_sin[]
+        , double neg_cos[], double neg_sin[]);
+    struct stepper_kinematics * stepper_ripple_alloc(void);
+"""
+
 defs_kin_idex = """
     void dual_carriage_set_sk(struct stepper_kinematics *sk
         , struct stepper_kinematics *orig_sk);
@@ -238,7 +252,7 @@ defs_all = [
     defs_steppersync, defs_itersolve, defs_trapq, defs_trdispatch,
     defs_kin_cartesian, defs_kin_corexy, defs_kin_corexz, defs_kin_delta,
     defs_kin_deltesian, defs_kin_polar, defs_kin_rotary_delta, defs_kin_winch,
-    defs_kin_extruder, defs_kin_shaper, defs_kin_idex,
+    defs_kin_extruder, defs_kin_shaper, defs_kin_idex, defs_kin_stepper_ripple,
     defs_kin_generic_cartesian,
 ]
 
