@@ -107,6 +107,7 @@ nav:
     - Resonance Compensation:
       - Resonance_Compensation.md
       - Measuring_Resonances.md
+      - Stepper_Ripple_Compensation.md
     - Pressure_Advance.md
     - G-Codes.md
     - Command templates:
