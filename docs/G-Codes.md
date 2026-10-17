@@ -1568,6 +1568,66 @@ reset the homing information. Manually moving a disabled stepper may
 cause the machine to operate the motor outside of safe limits. This
 can lead to damage to axis components, hot ends, and print surface.
 
+### [stepper_ripple_calibrate]
+
+The following commands are available when the
+[stepper_ripple_calibrate config section](
+  Config_Reference.md#stepper_ripple_calibrate)
+is enabled.
+
+#### STEPPER_RIPPLE_VIBRATION_MEASURE
+`STEPPER_RIPPLE_VIBRATION_MEASURE [ACCEL_CHIP=<chip>]
+[NAME=<config_name>] SPEEDS=<speed1>,<speed2>,...|MIN_SPEED=<speed>
+MAX_SPEED=<speed> [SPEED_STEP=<speed>] [ACCEL=<accel>]
+[MOVE_TIME=<seconds>] [AXIS=<DIAG|X|Y>] [POSITION=<pos>]
+[LABEL=<name>]`: Measure the vibrations with an accelerometer at each of
+the given stepper speeds (in mm/s). With AXIS=DIAG (the default) the
+toolhead moves forward and back in the direction in which only the
+steppers of the given stepper_ripple_compensation section turn
+(diagonally on corexy). The longest move is centered between the axis
+limits. Each move takes MOVE_TIME (default 1.5) seconds, shortened to
+fit the axes. Only its part at constant speed is analyzed.
+ACCEL_CHIP is the config section name of the accelerometer (for example
+`ACCEL_CHIP="adxl345 my_chip"`), by default the accel_chip of the
+[stepper_ripple_calibrate] section. ACCEL is the acceleration of the
+test moves, by default the current acceleration.
+With AXIS=X or AXIS=Y the toolhead moves along the given axis
+instead, at POSITION (default the middle) of the other axis. On corexy
+both belts then turn at the same speed, so the harmonics are those of
+all the steppers, measured relative to the phase of the given section.
+Output data saved to a stepper_ripple_vibration_*.txt table in
+~/printer_data/config/adxl_results/stepper_ripple_compensation/.
+The tables can be compared with scripts/stepper_ripple_compare.py.
+
+#### STEPPER_RIPPLE_CALIBRATE
+`STEPPER_RIPPLE_CALIBRATE HARMONIC=<1-4> [ACCEL_CHIP=<chip>]
+SPEEDS=<speed1>,<speed2>,...|MIN_SPEED=<speed> MAX_SPEED=<speed>
+[SPEED_STEP=<speed>] [NAME=<config_name>,...] [AMPLITUDE=<microns>]
+[NODE_SPEEDS=<speed1>,<speed2>,...] [APPLY=[0|1]]
+[AXIS=<axis1>,<axis2>,...] [POSITION=<pos>] [ACCEL=<accel>]
+[MOVE_TIME=<seconds>]`: Calibrate the speed nodes of
+one harmonic of the sections given by NAME (a comma separated list, by
+default all sections). The response to these test corrections gives
+the node changes that minimize the vibrations of all the test moves
+together.
+
+AXIS (default `DIAG`) is a list of the test moves: `DIAG` moves along
+the diagonal of each listed section and `X` and `Y` move along the axes
+at POSITION (default the middle) of the other axis, in which all the
+turning sections are tested together. Several axes are useful when the
+best correction of a speed depends on how the printer moves, for example
+when it differs between the diagonal and the axis moves on corexy.
+
+The new nodes are placed at NODE_SPEEDS, a comma separated list of
+stepper speeds in mm/s, by default at the tested speeds. With fewer
+nodes than tested speeds each node is fitted to the tests around it,
+which gives a smoother correction and needs fewer nodes. The new nodes
+replace the current nodes in the range of the node and the tested
+speeds, the other nodes are kept. The correction is constant outside of
+the first and the last node, so the speeds should cover the greater
+range of printing speeds. With APPLY=1 (the default) the new nodes are
+applied, use SAVE_CONFIG to store them.
+
 ### [stepper_ripple_compensation]
 
 The following commands are available when a
