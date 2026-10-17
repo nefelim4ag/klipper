@@ -42,6 +42,8 @@ communication with the Klipper developers.
   reduce ringing in prints.
   - [Measuring resonances](Measuring_Resonances.md): Information on
     using adxl345 accelerometer hardware to measure resonance.
+- [Stepper ripple compensation](Stepper_Ripple_Compensation.md):
+  Calibration of the stepper torque ripple correction.
 - [Pressure advance](Pressure_Advance.md): Calibrate extruder
   pressure.
 - [G-Codes](G-Codes.md): Information on commands supported by Klipper.
