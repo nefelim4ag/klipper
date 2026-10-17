@@ -2087,6 +2087,20 @@ section of the measuring resonances guide for more information on
 #   The default is 1.2 sec which is a good all-round choice.
 ```
 
+### [stepper_ripple_calibrate]
+
+Vibration tests and calibration of the
+[stepper_ripple_compensation](#stepper_ripple_compensation) sections
+with an accelerometer. The numpy package is required. Also see the
+[command reference](G-Codes.md#stepper_ripple_calibrate).
+
+```
+[stepper_ripple_calibrate]
+#accel_chip:
+#   A full name of the accelerometer chip to use for the measurements.
+#   If it is not set, the commands need the ACCEL_CHIP parameter.
+```
+
 ## Config file helpers
 
 ### [board_pins]
