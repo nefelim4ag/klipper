@@ -1568,6 +1568,80 @@ reset the homing information. Manually moving a disabled stepper may
 cause the machine to operate the motor outside of safe limits. This
 can lead to damage to axis components, hot ends, and print surface.
 
+### [stepper_ripple_calibrate]
+
+The following commands are available when the
+[stepper_ripple_calibrate config section](
+  Config_Reference.md#stepper_ripple_calibrate)
+is enabled.
+
+#### STEPPER_RIPPLE_VIBRATION_MEASURE
+`STEPPER_RIPPLE_VIBRATION_MEASURE [ACCEL_CHIP=<chip>]
+[NAME=<config_name>] SPEEDS=<speed1>,<speed2>,...|MIN_SPEED=<speed>
+MAX_SPEED=<speed> [SPEED_STEP=<speed>] [MOVE_TIME=<seconds>]
+[AXIS=<DIAG|X|Y>] [LABEL=<name>]`: Measure the vibrations with an
+accelerometer at each of the given stepper speeds (in mm/s). With
+AXIS=DIAG (the default) the toolhead moves forward and back in the
+direction in which only the steppers of the given
+stepper_ripple_compensation section turn (diagonally on corexy). The
+moves of all the speeds are centered on the middle of the axes and use
+the current acceleration. Each move takes MOVE_TIME (default 1.5)
+seconds, the moves of the speeds that do not fit the axes are
+shortened. Only its part at constant speed is analyzed, a speed whose
+analyzed part would be shorter than 0.2 seconds is refused. ACCEL_CHIP
+is the config section name of the accelerometer (for example
+`ACCEL_CHIP="adxl345 my_chip"`), by default the accel_chip of the
+[stepper_ripple_calibrate] section.
+With AXIS=X or AXIS=Y the toolhead moves along the given axis
+instead, in the middle of the other axis. On corexy
+both belts then turn at the same speed, so the harmonics are those of
+all the steppers, measured relative to the phase of the given section.
+Output data saved to a stepper_ripple_vibration_*.txt table in
+~/printer_data/config/adxl_results/stepper_ripple_compensation/.
+The tables can be compared with scripts/stepper_ripple_compare.py.
+
+#### STEPPER_RIPPLE_CALIBRATE
+`STEPPER_RIPPLE_CALIBRATE MIN_SPEED=<speed> MAX_SPEED=<speed>
+[MAX_ITERATIONS=<count>] [HARMONICS=<k1>,<k2>,...]
+[ACCEL_CHIP=<chip>] [NAME=<config_name>,...] [AMPLITUDE=<microns>]
+[MOVE_TIME=<seconds>] [APPLY=[0|1]] [LABEL=<name>]`: Calibrate the
+correction of the HARMONICS (default `1,2,4`) and the speed_model of
+the sections given by NAME (a comma separated list, by default all
+sections) in the range of stepper speeds from MIN_SPEED to MAX_SPEED
+(in mm/s). The tested speeds start at MIN_SPEED and grow by at most
+20% up to MAX_SPEED. At each speed the test moves of
+STEPPER_RIPPLE_VIBRATION_MEASURE are made along the diagonal of each
+section and along the X and Y axes, the axis moves at two positions of
+the other axis. The moves are made with the current correction and
+with a test correction of AMPLITUDE (default 4) microns added to all the
+calibrated harmonics of each section in turn, the harmonics are
+separated by their frequency. A harmonic is skipped at the speeds where
+its frequency is above 40% of the accelerometer sample rate.
+
+Each iteration then fits the correction and the speed_model to all the
+measurements so far, applies it and measures the test moves only with
+it, which also refines the response to the test corrections. The
+calibration stops when the fit expects less than 5% lower vibrations,
+when an iteration no longer lowers the vibrations, or after
+MAX_ITERATIONS (default 5). The correction with the lowest measured
+vibrations is kept. Its max_speed is MAX_SPEED or the larger max_speed
+of the sections, above it the correction fades out.
+
+A speed model is used only when it lowers the vibrations noticeably.
+The model has no sharp resonance, and the correction below and between
+the tested speeds may not be much larger than at them, otherwise the
+current speed_model is kept. A narrow range
+of speeds usually keeps the current speed_model. The harmonics of the
+sections that are not calibrated are refitted to a new speed model.
+
+Each iteration is reported with the rms vibration of each harmonic in
+mm/s^2 measured at the tested speeds, predicted with its fitted
+correction and the noise. The
+results are saved to a stepper_ripple_calibrate_*.txt file in
+~/printer_data/config/adxl_results/stepper_ripple_compensation/. With
+APPLY=1 (the default) the correction is applied, use SAVE_CONFIG to
+store it.
+
 ### [stepper_ripple_compensation]
 
 The following commands are available when a
