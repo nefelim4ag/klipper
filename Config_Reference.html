@@ -940,6 +940,13 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#stepper_ripple_compensation" class="md-nav__link">
+    [stepper_ripple_compensation]
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#adxl345" class="md-nav__link">
     [adxl345]
   </a>
@@ -984,6 +991,13 @@
           <li class="md-nav__item">
   <a href="#resonance_tester" class="md-nav__link">
     [resonance_tester]
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stepper_ripple_calibrate" class="md-nav__link">
+    [stepper_ripple_calibrate]
   </a>
   
 </li>
@@ -2121,6 +2135,20 @@
 
             
           
+            
+              
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="Stepper_Ripple_Compensation.html" class="md-nav__link">
+        Stepper ripple compensation
+      </a>
+    </li>
+  
+
+            
+          
         </ul>
       </nav>
     </li>
@@ -3125,6 +3153,13 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#stepper_ripple_compensation" class="md-nav__link">
+    [stepper_ripple_compensation]
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#adxl345" class="md-nav__link">
     [adxl345]
   </a>
@@ -3169,6 +3204,13 @@
           <li class="md-nav__item">
   <a href="#resonance_tester" class="md-nav__link">
     [resonance_tester]
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stepper_ripple_calibrate" class="md-nav__link">
+    [stepper_ripple_calibrate]
   </a>
   
 </li>
@@ -5719,6 +5761,30 @@ the <a href="G-Codes.html#input_shaper">command reference</a>.</p>
 #   parameter requires no tuning and should not be changed.
 </code></pre></div>
 
+<h3 id="stepper_ripple_compensation">[stepper_ripple_compensation]<a class="headerlink" href="#stepper_ripple_compensation" title="Permanent link">&para;</a></h3>
+<p>Stepper motor torque ripple compensation. Define a section for each
+stepper with a TMC driver, named after the stepper. Also see the
+<a href="G-Codes.html#stepper_ripple_compensation">command reference</a>.</p>
+<div class="highlight"><pre><span></span><code>[stepper_ripple_compensation stepper_x]
+#h1_nodes:
+#h2_nodes:
+#h3_nodes:
+#h4_nodes:
+#   The correction of the given harmonic of the electrical frequency
+#   as a function of the stepper speed and direction. Each line is a
+#   node &quot;speed, amplitude, phase, amplitude, phase&quot; with the speed
+#   in mm/s and the correction in microns and degrees for the positive
+#   and then the negative direction of motion of the stepper. The
+#   correction is interpolated linearly between the nodes. Max 16
+#   nodes. A single node is a correction that does not depend on the
+#   speed. The default is no correction. For example:
+#     80, 2.173, 67.8, 2.173, 100.0
+#     96, 2.189, 68.5, 2.258, 100.9
+#     124, 2.246, 66.1, 2.195, 107.5
+#max_step_error: 0.0000025
+#   Dev. Do not edit.
+</code></pre></div>
+
 <h3 id="adxl345">[adxl345]<a class="headerlink" href="#adxl345" title="Permanent link">&para;</a></h3>
 <p>Support for ADXL345 accelerometers. This support allows one to query
 accelerometer measurements from the sensor. This enables an
@@ -5945,6 +6011,17 @@ section of the measuring resonances guide for more information on
 #   disables slow sweeping moves. Avoid setting it to a too small
 #   non-zero value in order to not poison the measurements.
 #   The default is 1.2 sec which is a good all-round choice.
+</code></pre></div>
+
+<h3 id="stepper_ripple_calibrate">[stepper_ripple_calibrate]<a class="headerlink" href="#stepper_ripple_calibrate" title="Permanent link">&para;</a></h3>
+<p>Vibration tests and calibration of the
+<a href="#stepper_ripple_compensation">stepper_ripple_compensation</a> sections
+with an accelerometer. The numpy package is required. Also see the
+<a href="G-Codes.html#stepper_ripple_calibrate">command reference</a>.</p>
+<div class="highlight"><pre><span></span><code>[stepper_ripple_calibrate]
+#accel_chip:
+#   A full name of the accelerometer chip to use for the measurements.
+#   If it is not set, the commands need the ACCEL_CHIP parameter.
 </code></pre></div>
 
 <h2 id="config-file-helpers">Config file helpers<a class="headerlink" href="#config-file-helpers" title="Permanent link">&para;</a></h2>
