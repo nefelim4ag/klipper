@@ -4,7 +4,6 @@
 //
 // This file may be distributed under the terms of the GNU GPLv3 license.
 
-#include <math.h>  // sqrt
 #include <stddef.h> // offsetof
 #include <stdlib.h> // malloc
 #include <string.h> // memset
@@ -41,13 +40,12 @@ dual_carriage_calc_velocity(struct stepper_kinematics *sk, struct move *m
 {
     struct dual_carriage_stepper *dc = container_of(
             sk, struct dual_carriage_stepper, sk);
+    // The stepper velocity is linear in the axes velocities, so the
+    // direction may stay scaled
     dc->m.axes_r.x = m->axes_r.x * dc->x_scale;
     dc->m.axes_r.y = m->axes_r.y * dc->y_scale;
-    dc->m.axes_r.y = m->axes_r.z;
-    dc->m.start_v = move_get_velocity(m, move_time) * sqrt(
-            dc->m.axes_r.x * dc->m.axes_r.x +
-            dc->m.axes_r.y * dc->m.axes_r.y +
-            dc->m.axes_r.z * dc->m.axes_r.z);
+    dc->m.axes_r.z = m->axes_r.z;
+    dc->m.start_v = move_get_velocity(m, move_time);
     return dc->orig_sk->calc_velocity_cb(dc->orig_sk, &dc->m, DUMMY_T);
 }
 
