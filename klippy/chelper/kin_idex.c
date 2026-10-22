@@ -43,7 +43,7 @@ dual_carriage_calc_velocity(struct stepper_kinematics *sk, struct move *m
             sk, struct dual_carriage_stepper, sk);
     dc->m.axes_r.x = m->axes_r.x * dc->x_scale;
     dc->m.axes_r.y = m->axes_r.y * dc->y_scale;
-    dc->m.axes_r.y = m->axes_r.z;
+    dc->m.axes_r.z = m->axes_r.z;
     dc->m.start_v = move_get_velocity(m, move_time) * sqrt(
             dc->m.axes_r.x * dc->m.axes_r.x +
             dc->m.axes_r.y * dc->m.axes_r.y +

@@ -177,6 +177,7 @@ shaper_x_calc_velocity(struct stepper_kinematics *sk, struct move *m
     struct shaper_pulses *sx = &is->sp[0];
     if (!sx->num_pulses)
         return is->orig_sk->calc_velocity_cb(is->orig_sk, m, move_time);
+    is->m.axes_r.x = 1.;
     is->m.start_v = calc_velocity(m, 'x', move_time, sx);
     return is->orig_sk->calc_velocity_cb(is->orig_sk, &is->m, DUMMY_T);
 }
@@ -203,6 +204,7 @@ shaper_y_calc_velocity(struct stepper_kinematics *sk, struct move *m
     struct shaper_pulses *sy = &is->sp[1];
     if (!sy->num_pulses)
         return is->orig_sk->calc_velocity_cb(is->orig_sk, m, move_time);
+    is->m.axes_r.y = 1.;
     is->m.start_v = calc_velocity(m, 'y', move_time, sy);
     return is->orig_sk->calc_velocity_cb(is->orig_sk, &is->m, DUMMY_T);
 }
@@ -229,6 +231,7 @@ shaper_z_calc_velocity(struct stepper_kinematics *sk, struct move *m
     struct shaper_pulses *sz = &is->sp[2];
     if (!sz->num_pulses)
         return is->orig_sk->calc_velocity_cb(is->orig_sk, m, move_time);
+    is->m.axes_r.z = 1.;
     is->m.start_v = calc_velocity(m, 'z', move_time, sz);
     return is->orig_sk->calc_velocity_cb(is->orig_sk, &is->m, DUMMY_T);
 }
@@ -320,6 +323,23 @@ shaper_note_generation_time(struct input_shaper *is)
     is->sk.gen_steps_post_active = post_active;
 }
 
+// Select the velocity callback matching the active axes, they may change
+static void
+shaper_update_velocity_cb(struct input_shaper *is)
+{
+    int kin_flags = is->orig_sk->active_flags & (AF_X | AF_Y | AF_Z);
+    if (!is->orig_sk->calc_velocity_cb)
+        is->sk.calc_velocity_cb = NULL;
+    else if (kin_flags == AF_X)
+        is->sk.calc_velocity_cb = shaper_x_calc_velocity;
+    else if (kin_flags == AF_Y)
+        is->sk.calc_velocity_cb = shaper_y_calc_velocity;
+    else if (kin_flags == AF_Z)
+        is->sk.calc_velocity_cb = shaper_z_calc_velocity;
+    else
+        is->sk.calc_velocity_cb = shaper_xyz_calc_velocity;
+}
+
 void __visible
 input_shaper_update_sk(struct stepper_kinematics *sk)
 {
@@ -333,6 +353,7 @@ input_shaper_update_sk(struct stepper_kinematics *sk)
         is->sk.calc_position_cb = shaper_z_calc_position;
     else
         is->sk.calc_position_cb = shaper_xyz_calc_position;
+    shaper_update_velocity_cb(is);
     is->sk.active_flags = is->orig_sk->active_flags;
     shaper_note_generation_time(is);
 }
@@ -360,18 +381,7 @@ input_shaper_set_sk(struct stepper_kinematics *sk
     if (orig_sk->post_cb) {
         is->sk.post_cb = shaper_commanded_pos_post_fixup;
     }
-    if (orig_sk->calc_velocity_cb) {
-        if (orig_sk->active_flags == AF_X)
-            is->sk.calc_velocity_cb = shaper_x_calc_velocity;
-        else if (orig_sk->active_flags == AF_Y)
-            is->sk.calc_velocity_cb = shaper_y_calc_velocity;
-        else if (orig_sk->active_flags == AF_Z)
-            is->sk.calc_velocity_cb = shaper_z_calc_velocity;
-        else if (orig_sk->active_flags & (AF_X | AF_Y | AF_Z))
-            is->sk.calc_velocity_cb = shaper_xyz_calc_velocity;
-        else
-            return -1;
-    }
+    shaper_update_velocity_cb(is);
     return 0;
 }
 
