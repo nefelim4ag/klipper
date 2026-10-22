@@ -28,8 +28,12 @@ struct stepper_ripple {
     int count;
     int node_count[MAX_HARMONIC];
     double node_v[MAX_HARMONIC][MAX_NODES];
-    double node_pos[MAX_HARMONIC][MAX_NODES][2];
-    double node_neg[MAX_HARMONIC][MAX_NODES][2];
+    // Linear segments of the nodes, node_last is the last used one
+    double seg_lo[MAX_HARMONIC][MAX_NODES + 1];
+    double seg_hi[MAX_HARMONIC][MAX_NODES + 1];
+    double seg_icpt[MAX_HARMONIC][MAX_NODES + 1][4];
+    double seg_slope[MAX_HARMONIC][MAX_NODES + 1][4];
+    int node_last[MAX_HARMONIC];
 };
 
 // Return the move and the move time of a time that may be outside of the move
@@ -83,30 +87,33 @@ static void
 stepper_ripple_nodes(struct stepper_ripple *rs, int i, double speed
                      , double *pos, double *neg)
 {
-    int n = rs->node_count[i], j0 = 0, j1 = 0;
-    double *nv = rs->node_v[i], f = 0.;
-    if (speed >= nv[n-1]) {
-        j0 = j1 = n - 1;
-    } else if (speed > nv[0]) {
-        // Binary search of the nodes around the speed
-        j0 = 0;
-        j1 = n - 1;
-        while (j1 - j0 > 1) {
-            int m = (j0 + j1) / 2;
-            if (speed < nv[m])
-                j1 = m;
-            else
-                j0 = m;
+    int j = rs->node_last[i];
+    if (speed < rs->seg_lo[i][j] || speed >= rs->seg_hi[i][j]) {
+        int n = rs->node_count[i];
+        double *nv = rs->node_v[i];
+        if (speed < nv[0]) {
+            j = 0;
+        } else if (speed >= nv[n-1]) {
+            j = n;
+        } else {
+            // Binary search of the nodes around the speed
+            int j0 = 0, j1 = n - 1;
+            while (j1 - j0 > 1) {
+                int m = (j0 + j1) / 2;
+                if (speed < nv[m])
+                    j1 = m;
+                else
+                    j0 = m;
+            }
+            j = j0 + 1;
         }
-        f = (speed - nv[j0]) / (nv[j1] - nv[j0]);
+        rs->node_last[i] = j;
     }
-    int c;
-    for (c = 0; c < 2; c++) {
-        pos[c] = (rs->node_pos[i][j0][c]
-                  + f * (rs->node_pos[i][j1][c] - rs->node_pos[i][j0][c]));
-        neg[c] = (rs->node_neg[i][j0][c]
-                  + f * (rs->node_neg[i][j1][c] - rs->node_neg[i][j0][c]));
-    }
+    double *ic = rs->seg_icpt[i][j], *sl = rs->seg_slope[i][j];
+    pos[0] = ic[0] + sl[0] * speed;
+    pos[1] = ic[1] + sl[1] * speed;
+    neg[0] = ic[2] + sl[2] * speed;
+    neg[1] = ic[3] + sl[3] * speed;
 }
 
 // Calculate the position correction at a given stepper position
@@ -234,13 +241,23 @@ stepper_ripple_set_nodes(struct stepper_kinematics *sk, int k, int count
     for (i = 1; i < count; i++)
         if (speeds[i] <= speeds[i-1])
             return -1;
-    for (i = 0; i < count; i++) {
-        rs->node_v[k-1][i] = speeds[i];
-        rs->node_pos[k-1][i][0] = pos_cos[i];
-        rs->node_pos[k-1][i][1] = pos_sin[i];
-        rs->node_neg[k-1][i][0] = neg_cos[i];
-        rs->node_neg[k-1][i][1] = neg_sin[i];
+    int h = k - 1, c;
+    for (i = 0; i < count; i++)
+        rs->node_v[h][i] = speeds[i];
+    for (i = 0; i <= count && count; i++) {
+        int j0 = i ? i - 1 : 0, j1 = i < count ? i : count - 1;
+        rs->seg_lo[h][i] = i ? speeds[i-1] : -1e300;
+        rs->seg_hi[h][i] = i < count ? speeds[i] : 1e300;
+        double v0 = speeds[j0], inv = j1 > j0 ? 1. / (speeds[j1] - v0) : 0.;
+        double c0[4] = {pos_cos[j0], pos_sin[j0], neg_cos[j0], neg_sin[j0]};
+        double c1[4] = {pos_cos[j1], pos_sin[j1], neg_cos[j1], neg_sin[j1]};
+        for (c = 0; c < 4; c++) {
+            double slope = (c1[c] - c0[c]) * inv;
+            rs->seg_slope[h][i][c] = slope;
+            rs->seg_icpt[h][i][c] = c0[c] - slope * v0;
+        }
     }
+    rs->node_last[h] = 0;
     rs->node_count[k-1] = count;
     stepper_ripple_update_count(rs);
     return 0;
