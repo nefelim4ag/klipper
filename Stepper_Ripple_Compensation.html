@@ -1675,10 +1675,11 @@ current correction and twice for each motor that turns, so a step of
 5 to 10 mm/s is usually enough.</p>
 <p><code>NODE_SPEEDS</code> are the speeds of the new nodes. The correction is
 interpolated linearly between the nodes and is constant below the first
-and above the last node, only below 2 mm/s it fades out to zero at
-standstill. With fewer nodes than test speeds each node is
-fitted to the tests around it, which gives a smoother correction. Place
-the nodes at the edges of the peak and every 15 to 20 mm/s inside it.
+and above the last node, only below a toolhead speed of 2 mm/s it
+fades out to zero at standstill. With fewer nodes than test speeds each
+node is fitted to the tests around it, which gives a smoother
+correction. Place the nodes at the edges of the peak and every 15 to
+20 mm/s inside it.
 Current nodes outside the range of the new nodes and the tested speeds
 are kept. A harmonic can have at most <strong>16 nodes</strong>, the kept ones included,
 but there is no need for that many. Many nodes are mostly useful to
