@@ -23,9 +23,10 @@ class EmbeddedVM:
         self.OBJCOPY = "riscv64-%s-objcopy"
         self.NM      = "riscv64-%s-nm"
         self.CFLAGS  = "-O2 -march=rv32ec -mabi=ilp32e -ffreestanding " \
-                       "-nostdlib -fPIE -Wvla -Werror=vla " \
-                       "-Werror=stack-usage=256 " \
+                       "-nostdlib -Wvla -Werror=vla " \
+                       "-Werror=stack-usage=192 " \
                        "-ffunction-sections -fdata-sections " \
+                       "-fno-pic -mcmodel=medlow " \
                        "-I%s" % self.dir
         try:
             tool = self.CC % toolchains[0]
@@ -147,7 +148,7 @@ class EmbeddedVM:
         symbols, total_size = self._compile()
         cmd_offset = symbols.get("command", 0)
         if cmd_offset != 0:
-            self.printer.command_error("evm command function must be first")
+            raise self.printer.command_error("evm command function must be first")
         task_offset = symbols.get("task", 0)
         self.mcu.add_config_cmd("config_evm oid=%d data_size=%d "
                                 "task_offset=%d evm_mode=%s" % (

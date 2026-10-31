@@ -110,7 +110,14 @@ spidev_transfer(struct spidev_s *spi, uint8_t receive_data
     if (flags & SF_HAVE_PIN)
         gpio_out_write(spi->pin, !(flags & SF_CS_ACTIVE_HIGH));
 }
-DECL_FW_CALL4(void, spidev_transfer, struct spidev_s *spi, uint8_t receive_data
+
+void spidev_oid_transfer(uint8_t oid, uint8_t receive_data
+                , uint8_t data_len, uint8_t *data)
+{
+    struct spidev_s *spi = spidev_oid_lookup(oid);
+    spidev_transfer(spi, receive_data, data_len, data);
+}
+DECL_FW_CALL4(void, spidev_oid_transfer, uint8_t oid, uint8_t receive_data
                 , uint8_t data_len, uint8_t *data);
 
 void

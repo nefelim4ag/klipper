@@ -4,11 +4,75 @@
 //
 // This file may be distributed under the terms of the GNU GPLv3 license.
 
+#include <stddef.h>
 #include <stdint.h>
 #include "riscv-evm.h"
 
-static uint8_t *
-lx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
+// Memory isolation
+#define EVM_PROG_BASE 0xFEFF8000
+#define EVM_STACK_TOP 0x8000u
+#define EVM_STACK_SIZE 192u
+#define EVM_STACK_LOW (EVM_STACK_TOP - EVM_STACK_SIZE)
+
+uint8_t *
+evm_g2h(const struct evm_ctx *ctx, uint16_t addr, uint_fast8_t len)
+{
+    uint16_t offset = addr - EVM_STACK_LOW;
+    if (offset < EVM_STACK_SIZE && len <= EVM_STACK_SIZE - offset)
+        return ctx->stack + offset;
+    offset = addr - ctx->win.base;
+    if (offset < ctx->win.size && len <= ctx->win.size - offset)
+        return ctx->win.mem + offset;
+    if (addr + len <= ctx->img_size)
+        return ctx->prog_start + addr;
+    return NULL;
+}
+
+static uint32_t
+pc2g(const struct evm_ctx *ctx, const uint8_t *PC)
+{
+    return (uint32_t)(PC - ctx->prog_start);
+}
+
+static uint8_t
+*g2pc(struct evm_ctx *ctx, uint32_t target)
+{
+    // == img_size is the "return to host" exit
+    if (target > ctx->img_size) {
+        ctx->fault = 1;
+        return ctx->prog_start + ctx->img_size;
+    }
+    return ctx->prog_start + target;
+}
+
+int
+evm_window_init(struct evm_mmap *w, uint8_t *prog_start, uint8_t *prog_end,
+                void *mem, uint16_t size)
+{
+    uint32_t img_size = prog_end - prog_start;
+    uint32_t base = (img_size + 3u) & ~3u;
+    if (base >= EVM_STACK_LOW)
+        return EVM_ENOMEM;
+    uint32_t room = EVM_STACK_LOW - base;
+    w->mem  = mem;
+    w->base = base;
+    w->size = size;
+    if (size > room)
+        return EVM_ENOMEM;
+    return 0;
+}
+
+uint16_t
+evm_h2g(const struct evm_mmap *w, const void *p)
+{
+    uintptr_t off = (uintptr_t)p - (uintptr_t)w->mem;
+    if (off >= w->size)
+        return 0;
+    return w->base + off;
+}
+
+static void
+lx(struct evm_ctx *ctx, uint32_t *X, uint32_t inst, uint8_t MODE)
 {
     uint8_t rd = (inst >> 7) & 0x1f;
     uint8_t func3 = (inst >> 12) & 0x7;
@@ -16,17 +80,22 @@ lx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
     uint32_t offset = (inst >> 20) & 0xfff;
     if (inst & 0x80000000)
         offset |= 0xfffff000;
-    uint8_t *mem = (uint8_t *)(X[rs1] + offset);
+    uint_fast16_t addr = X[rs1] + offset;
     uint8_t width = 1 << (func3 & 0x3); // 1, 2, 4 bytes
     uint8_t is_signed = !(func3 & 0x4);
 
     if (MODE) {
         static const char *names[] = {"lb","lh","lw","?","lbu","lhu"};
-        evm_print("%s x[%d] = M[x[%d] + %d] // = %p", names[func3],
-            rd, rs1, offset, mem);
+        evm_print("%s x[%d] = M[x[%d] + %d] // addr 0x%x", names[func3 & 0x3],
+            rd, rs1, offset, addr);
     }
-    if (MODE == EVM_MODE_DISASM) {
+    if (MODE == EVM_MODE_DISASM)
         goto out;
+
+    uint8_t *mem = evm_g2h(ctx, addr, width);
+    if (!mem) {
+        ctx->fault = 1;
+        return;
     }
 
     uint32_t val = 0;
@@ -41,11 +110,10 @@ lx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
 out:
     if (MODE)
         evm_print(" %d\n", X[rd]);
-    return PC + 4;
 }
 
-static uint8_t *
-alu(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
+static void
+alu(uint32_t *X, uint32_t inst, uint8_t MODE)
 {
     uint8_t rd = (inst >> 7) & 0x1f;
     uint8_t func3 = (inst >> 12) & 0x7;
@@ -61,7 +129,7 @@ alu(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
                 evm_print("addi x[%d] = x[%d] (0x%08x) + sext(%d) //", rd, rs1, X[rs1], (int32_t)imm);
             if (MODE == EVM_MODE_DISASM) {
                 evm_print("\n");
-                goto out;
+                return;
             }
             X[rd] = X[rs1] + imm;
             if (MODE)
@@ -71,14 +139,14 @@ alu(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("slli x[%d] = x[%d] << %d\n", rd, rs1, shamt);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] << shamt;
             break;
         case 2: // slti
             if (MODE)
                 evm_print("slti x[%d] = x[%d] <s sext(%d)\n", rd, rs1, imm);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             int32_t i_imm = imm;
             X[rd] = srs1 < i_imm;
             break;
@@ -86,14 +154,14 @@ alu(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("sltiu x[%d] = x[%d] <u sext(%d)\n", rd, rs1, imm);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] < imm;
             break;
         case 4: // xori
             if (MODE)
                 evm_print("xori x[%d] = x[%d] ^ sext(%d)\n", rd, rs1, imm);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] ^ imm;
             break;
         case 5: // srli srai
@@ -102,7 +170,7 @@ alu(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
                     evm_print("srli x[%d] = x[%d] >> %d //", rd, rs1, shamt);
                 if (MODE == EVM_MODE_DISASM) {
                     evm_print("\n");
-                    goto out;
+                    return;
                 }
                 X[rd] = X[rs1] >> shamt;
                 if (MODE)
@@ -112,7 +180,7 @@ alu(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
                     evm_print("srai x[%d] = x[%d] >>s %d //", rd, rs1, shamt);
                 if (MODE == EVM_MODE_DISASM) {
                     evm_print("\n");
-                    goto out;
+                    return;
                 }
                 X[rd] = srs1 >> shamt;
                 if (MODE)
@@ -123,23 +191,21 @@ alu(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("ori x[%d] = x[%d] | sext(%d)\n", rd, rs1, imm);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] | imm;
             break;
         case 7: // andi
             if (MODE)
                 evm_print("andi x[%d] = x[%d] & sext(%d)\n", rd, rs1, imm);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] & imm;
             break;
     }
-out:
-    return PC + 4;
 }
 
-static uint8_t *
-sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
+static void
+sx(uint32_t *X, uint32_t inst, uint8_t MODE)
 {
     uint8_t rd = (inst >> 7) & 0x1f;
     uint8_t func3 = (inst >> 12) & 0x7;
@@ -154,7 +220,7 @@ sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
                 if (MODE)
                     evm_print("sub x[%d] = x[%d] - x[%d]\n", rd, rs1, rs2);
                 if (MODE == EVM_MODE_DISASM)
-                    goto out;
+                    return;
                 X[rd] = X[rs1] - X[rs2];
                 break;
             }
@@ -162,7 +228,7 @@ sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("add x[%d] = x[%d] + x[%d]\n", rd, rs1, rs2);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] + X[rs2];
             break;
         case 1:
@@ -170,7 +236,7 @@ sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("sll x[%d] = x[%d] << x[%d]\n", rd, rs1, rs2);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] << (X[rs2] & 0x1f);
             break;
         case 2:
@@ -178,7 +244,7 @@ sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("slt x[%d] = bool(x[%d] <s x[%d])\n", rd, rs1, rs2);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = srs1 < srs2;
             break;
         case 3:
@@ -186,7 +252,7 @@ sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("sltu x[%d] = bool(x[%d] <u x[%d])\n", rd, rs1, rs2);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] < X[rs2];
             break;
         case 4:
@@ -194,7 +260,7 @@ sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("xor x[%d] = x[%d] ^ x[%d]\n", rd, rs1, rs2);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] ^ X[rs2];
             break;
         case 5:
@@ -203,7 +269,7 @@ sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
                 if (MODE)
                     evm_print("slr x[%d] = x[%d] >>s x[%d]\n", rd, rs1, rs2);
                 if (MODE == EVM_MODE_DISASM)
-                    goto out;
+                    return;
                 X[rd] = srs1 >> (X[rs2] & 0x1f);
                 break;
             }
@@ -211,7 +277,7 @@ sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("slr x[%d] = x[%d] >> x[%d]\n", rd, rs1, rs2);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] >> (X[rs2] & 0x1f);
             break;
         case 6:
@@ -219,7 +285,7 @@ sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("or x[%d] = x[%d] | x[%d]\n", rd, rs1, rs2);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] | X[rs2];
             break;
         case 7:
@@ -227,16 +293,14 @@ sx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE)
                 evm_print("and x[%d] = x[%d] & x[%d]\n", rd, rs1, rs2);
             if (MODE == EVM_MODE_DISASM)
-                goto out;
+                return;
             X[rd] = X[rs1] & X[rs2];
             break;
     }
-out:
-    return PC+4;
 }
 
 static uint8_t *
-bxx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
+bxx(struct evm_ctx *ctx, uint8_t *PC, uint32_t inst, uint8_t MODE)
 {
     uint8_t func3 = (inst >> 12) & 0x7;
     uint8_t rs1 = (inst >> 15) & 0x1f;
@@ -247,30 +311,30 @@ bxx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
         (((inst >>  7) & 0x1)  << 11);   // imm[11]
     if (inst & 0x80000000)
         offset |= 0xfffff000;
-    uint32_t urs1 = X[rs1];
-    uint32_t urs2 = X[rs2];
-    int32_t srs1 = X[rs1];
-    int32_t srs2 = X[rs2];
+    uint32_t urs1 = ctx->X[rs1];
+    uint32_t urs2 = ctx->X[rs2];
+    int32_t srs1 = ctx->X[rs1];
+    int32_t srs2 = ctx->X[rs2];
     switch (func3) {
         case 0: // beq
             if (MODE)
                 evm_print(
                     "beq if (x[%d] == x[%d]) pc += sext(%d)) // %d == %d\n",
-                    rs1, rs2, offset, X[rs1], X[rs2]);
+                    rs1, rs2, offset, urs1, urs2);
             if (MODE == EVM_MODE_DISASM)
                 goto out;
-            if (X[rs1] == X[rs2])
-                return PC + offset;
+            if (urs1 == urs2)
+                return g2pc(ctx, pc2g(ctx, PC) + offset);
             break;
         case 1: // bne
             if (MODE)
                 evm_print(
                     "bne if (x[%d] != x[%d]) pc += sext(%d)) // %d != %d\n",
-                    rs1, rs2, offset, X[rs1], X[rs2]);
+                    rs1, rs2, offset, urs1, urs2);
             if (MODE == EVM_MODE_DISASM)
                 goto out;
-            if (X[rs1] != X[rs2])
-                return PC + offset;
+            if (urs1 != urs2)
+                return g2pc(ctx, pc2g(ctx, PC) + offset);
             break;
         case 4: // blt
             if (MODE)
@@ -280,7 +344,7 @@ bxx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE == EVM_MODE_DISASM)
                 goto out;
             if (srs1 < srs2)
-                return PC + offset;
+                return g2pc(ctx, pc2g(ctx, PC) + offset);
             break;
         case 5: // bge
             if (MODE)
@@ -290,7 +354,7 @@ bxx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE == EVM_MODE_DISASM)
                 goto out;
             if (srs1 >= srs2)
-                return PC + offset;
+                return g2pc(ctx, pc2g(ctx, PC) + offset);
             break;
         case 6: // bltu
             if (MODE)
@@ -300,7 +364,7 @@ bxx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE == EVM_MODE_DISASM)
                 goto out;
             if (urs1 < urs2)
-                return PC + offset;
+                return g2pc(ctx, pc2g(ctx, PC) + offset);
             break;
         case 7: // bgeu
             if (MODE)
@@ -310,15 +374,16 @@ bxx(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             if (MODE == EVM_MODE_DISASM)
                 goto out;
             if (urs1 >= urs2)
-                return PC + offset;
+                return g2pc(ctx, pc2g(ctx, PC) + offset);
             break;
     }
 out:
     return PC + 4;
 }
 
-static uint8_t *
-sw(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
+static void
+sw(struct evm_ctx *ctx, uint32_t *X, uint32_t inst,
+    uint8_t MODE)
 {
     uint8_t func3 = (inst >> 12) & 0x7;
     uint8_t rs1 = (inst >> 15) & 0x1f;
@@ -328,32 +393,35 @@ sw(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
         (((inst >> 25) & 0x7f) << 5);
     if (inst & 0x80000000)
         offset |= 0xfffff000;
-    uint8_t *mem = (uint8_t *)(X[rs1] + offset);
+    uint_fast16_t addr = X[rs1] + offset;
     uint8_t width = 1 << (func3 & 0x3); // 1, 2, 4 bytes
     if (MODE) {
         static const char *names[] = {"sb","sh","sw"};
-        evm_print("%s M[x[%d] + sext(%d)] = x[%d][%d:0] // * (u8 *) %p = %d\n",
-            names[func3], rs1, offset, rs2, width * 8 -1, mem, X[rs2]);
+        evm_print("%s M[x[%d] + sext(%d)] = x[%d][%d:0] // *(u8 *) 0x%x = %d\n",
+            names[func3 & 0x3], rs1, offset, rs2, width * 8 -1, addr, X[rs2]);
     }
     if (MODE == EVM_MODE_DISASM)
-        goto out;
+        return;
+    uint8_t *mem = evm_g2h(ctx, addr, width);
+    if (!mem) {
+        ctx->fault = 1;
+        return;
+    }
     for (int i = 0; i < width; i++)
         mem[i] = X[rs2] >> (i * 8);
-out:
-    return PC + 4;
 }
 
 static uint8_t *
-auipc(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
+auipc(struct evm_ctx *ctx, uint8_t *PC, uint32_t inst, uint8_t MODE)
 {
     uint8_t rd = (inst >> 7) & 0x1f;
-    int32_t imm = inst & 0xffffff000;
+    int32_t imm = inst & 0xfffff000;
     // AUIPC
     if (MODE)
         evm_print("auipc x[%d] = pc + sext(%d)\n", rd, imm);
     if (MODE == EVM_MODE_DISASM)
         goto out;
-    X[rd] = (uint32_t) (PC + imm);
+    ctx->X[rd] = pc2g(ctx, PC) + imm;
 out:
     return PC + 4;
 }
@@ -363,7 +431,7 @@ lui(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
 {
     // LUI
     uint8_t rd = (inst >> 7) & 0x1f;
-    int32_t imm = inst & 0xffffff000;
+    int32_t imm = inst & 0xfffff000;
     if (MODE)
         evm_print("lui x[%d] = sext(0x%x)\n", rd, imm);
     if (MODE == EVM_MODE_DISASM)
@@ -374,9 +442,9 @@ out:
 }
 
 static uint8_t *
-jalr(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
+jalr(struct evm_ctx *ctx, uint8_t *PC, uint32_t inst, uint8_t MODE)
 {
-        // JALR
+    // JALR
     uint8_t rd = (inst >> 7) & 0x1f;
     uint8_t rs1 = (inst >> 15) & 0x1f;
     uint32_t offset = (inst >> 20) & 0xfff;
@@ -388,17 +456,17 @@ jalr(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
             rs1, offset, rd);
     if (MODE == EVM_MODE_DISASM)
         goto out;
-    uint32_t t = (uint32_t) PC + 4;
-    PC = (uint8_t *) ((X[rs1] + offset) & ~1);
+    uint32_t t = pc2g(ctx, PC) + 4;
+    PC = g2pc(ctx, (ctx->X[rs1] + offset) & ~1u);
     if (rd)
-        X[rd] = t;
+        ctx->X[rd] = t;
     return PC;
 out:
     return PC + 4;
 }
 
 static uint8_t *
-jal(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
+jal(struct evm_ctx *ctx, uint8_t *PC, uint32_t inst, uint8_t MODE)
 {
     // JAL
     uint8_t rd = (inst >> 7) & 0x1f;
@@ -413,33 +481,35 @@ jal(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
     if (MODE == EVM_MODE_DISASM)
         goto out;
     if (rd) // x0 is readonly, and always zero, it is a special case
-        X[rd] = (uint32_t)(PC + 4);
-    return PC + offset;
+        ctx->X[rd] = pc2g(ctx, PC) + 4;;
+    return g2pc(ctx, pc2g(ctx, PC) + offset);
 out:
     return PC + 4;
 }
 
-static uint8_t *
-ecall(uint8_t *PC, uint32_t *X, uint32_t inst, uint8_t MODE)
+static void
+ecall(struct evm_ctx *ctx, uint32_t inst, uint8_t MODE)
 {
     uint16_t id = inst >> 20;
     if (MODE)
         evm_print(
             "ecall id: %d a0 %x, a1 %x, a2 %x, a3 %x, a4 %x\n",
-                id, X[10], X[11], X[12], X[13], X[14]);
+                id, ctx->X[10], ctx->X[11], ctx->X[12], ctx->X[13], ctx->X[14]);
     if (MODE != EVM_MODE_DISASM)
-        platform_ecall(id, &X[10]);
-    return PC + 4;
+        platform_ecall(ctx, id, &ctx->X[10]);
 }
-static uint8_t *
-c0(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
+
+static void
+c0(struct evm_ctx *ctx, uint32_t *X, uint16_t inst, uint8_t MODE)
+{
     const uint8_t opcode = inst >> 13;
     uint8_t rd = ((inst >> 2) & 0x7) + 8;
     uint8_t rs1 = ((inst >> 7) & 0x7) + 8;
     uint32_t imm = ((inst >> 6) & 0x1) << 2 |
                    ((inst >> 10) & 0x7) << 3 |
                    ((inst >> 5) & 0x1) << 6;
-    uint8_t *mem = (uint8_t *) (X[rs1] + imm);
+    uint_fast16_t addr = X[rs1] + imm;
+    uint8_t *mem;
     switch (opcode) {
         case 0: // c.addi4spn
             imm = ((inst >> 6) & 0x1) << 2;
@@ -457,9 +527,14 @@ c0(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
                 evm_print("c.lw x[%d] = M[x[%d] + %d]\n", rd, rs1, imm);
             if (MODE == EVM_MODE_DISASM)
                 break;
+            mem = evm_g2h(ctx, addr, 4);
+            if (!mem) {
+                ctx->fault = 1;
+                return;
+            }
             uint32_t val = 0;
             for (int i = 0; i < 4; i++)
-                val |= mem[i] << (i * 8);
+                val |= (uint32_t)mem[i] << (i * 8);
             X[rd] = val;
             break;
         case 6: // c.sw
@@ -469,6 +544,11 @@ c0(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
                     imm, rs2);
             if (MODE == EVM_MODE_DISASM)
                 break;
+            mem = evm_g2h(ctx, addr, 4);
+            if (!mem) {
+                ctx->fault = 1;
+                break;
+            }
             for (int i = 0; i < 4; i++)
                 mem[i] = X[rs2] >> (i * 8);
             break;
@@ -477,10 +557,10 @@ c0(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
                 evm_print("c.opcode 0x%1x.%d - not implemented\n",
                     opcode, 0);
     }
-    return PC + 2;
 }
 static uint8_t *
-c1(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
+c1(struct evm_ctx *ctx, uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE)
+{
     const uint8_t opcode = inst >> 13;
     uint8_t rd = (inst >> 7) & 0x1f;
     uint32_t imm = (inst >> 2) & 0x1f;
@@ -513,7 +593,7 @@ c1(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
                 imm |= ((inst >> 3) & 0x1) << 7;
                 imm |= ((inst >> 2) & 0x1) << 5;
                 if (inst & 0x1000)
-                    imm |= 0xffffff00;
+                    imm |= 0xfffffe00;
                 if (MODE)
                     evm_print("c.addi16sp x[2] += sext(%d)\n",
                         (int32_t)imm);
@@ -612,8 +692,8 @@ c1(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
             if (MODE == EVM_MODE_DISASM)
                 break;
             if (opcode == 1)
-                X[1] = (uint32_t) PC + 2;
-            return PC + imm;
+                X[1] = pc2g(ctx, PC) + 2;
+            return g2pc(ctx, pc2g(ctx, PC) + imm);;
         case 6: // c.beqz
         case 7: // c.bnez
             rs1 = ((inst >> 7) & 0x7) + 8;
@@ -640,7 +720,7 @@ c1(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
             // if (!eqz && (opcode & 1)) //
             //     return PC + offset;
             if (eqz ^ (opcode & 1))
-                return PC + offset;
+                return g2pc(ctx, pc2g(ctx, PC) + offset);
             break;
         default:
             if (MODE)
@@ -651,11 +731,14 @@ c1(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
 }
 
 static uint8_t *
-c2(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
+c2(struct evm_ctx *ctx, uint8_t *PC, uint32_t *X, uint16_t inst,
+    uint8_t MODE)
+{
     const uint8_t opcode = inst >> 13;
     uint8_t rd = (inst >> 7) & 0x1f;
     uint8_t rs1 = rd;
     uint8_t rs2 = (inst >> 2) & 0x1f;
+    uint_fast16_t addr;
     uint8_t *mem;
     uint32_t imm;
     switch (opcode) {
@@ -675,10 +758,15 @@ c2(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
                 evm_print("c.lwsp x[%d] = M[x[2] + %d]\n", rd, imm);
             if (MODE == EVM_MODE_DISASM)
                 break;
-            mem = (uint8_t *) (X[2] + imm);
+            addr = X[2] + imm;
+            mem = evm_g2h(ctx, addr, 4);
+            if (!mem) {
+                ctx->fault = 1;
+                break;
+            }
             uint32_t val = 0;
             for (int i = 0; i < 4; i++)
-                val |= mem[i] << (i * 8);
+                val |= (uint32_t)mem[i] << (i * 8);
             X[rd] = val;
             break;
         case 4:
@@ -694,7 +782,7 @@ c2(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
                         evm_print("c.jr pc = x[%d] // 0x%x\n", rs1, X[rs1]);
                     if (MODE == EVM_MODE_DISASM)
                         break;
-                    return (uint8_t *) X[rs1];
+                    return g2pc(ctx, X[rs1] & ~1u);
                 }
             } else {
                 if (rs2 == 0) {
@@ -709,8 +797,8 @@ c2(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
                                 rs1, X[rs1]);
                         if (MODE == EVM_MODE_DISASM)
                             break;
-                        uint32_t t = (uint32_t) (PC + 2);
-                        PC = (uint8_t *) X[rs1];
+                        uint32_t t = pc2g(ctx, PC) + 2;
+                        PC = g2pc(ctx, X[rs1] & ~1u);
                         X[1] = t;
                         return PC;
                     }
@@ -733,7 +821,12 @@ c2(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
                     imm, rs2, X[rs2]);
             if (MODE == EVM_MODE_DISASM)
                 break;
-            mem = (uint8_t *) (X[2] + imm);
+            addr = X[2] + imm;
+            mem = evm_g2h(ctx, addr, 4);
+            if (!mem) {
+                ctx->fault = 1;
+                break;
+            }
             for (int i = 0; i < 4; i++)
                 mem[i] = X[rs2] >> (i * 8);
             break;
@@ -746,26 +839,32 @@ c2(uint8_t *PC, uint32_t *X, uint16_t inst, uint8_t MODE) {
 }
 
 int
-evm_interpreter(uint8_t *prog_start, uint8_t *end,
-                uint8_t mode, struct evm_args *args)
+evm_interpreter(uint8_t *prog_start, uint8_t *end, uint16_t entry_offset,
+                uint8_t mode, struct evm_args *args, struct evm_mmap *win)
 {
     const uint8_t MODE = mode;
     if (MODE == EVM_MODE_DISASM)
         evm_print("Run disassembler\n");
     if (MODE == EVM_MODE_INT_DEBUG)
         evm_print("Run interpreter debug mode\n");
-    uint32_t X[16];
-    uint8_t stack[256];
-    X[0] = 0; // always
-    X[1] = (uint32_t) end; // dummy return point
-    X[2] = (uint32_t) &stack[sizeof(stack)]; // stack pointer
-    X[10] = args->a0;
-    X[11] = args->a1;
-    X[12] = args->a2;
-    X[13] = args->a3;
-    X[14] = args->a4;
+    uint8_t stack[EVM_STACK_SIZE];
+    struct evm_ctx ctx = {
+        .stack = stack,
+        .prog_start = prog_start,
+        .img_size = end - prog_start,
+        .fault = 0
+    };
+    ctx.win = *win;
+    ctx.X[0] = 0; // always
+    ctx.X[1] = ctx.img_size;   // dummy return point
+    ctx.X[2] = EVM_STACK_TOP;  // stack pointer
+    ctx.X[10] = args->a0;
+    ctx.X[11] = args->a1;
+    ctx.X[12] = args->a2;
+    ctx.X[13] = args->a3;
+    ctx.X[14] = args->a4;
     // Program counter
-    uint8_t *PC = prog_start;
+    uint8_t *PC = prog_start + entry_offset;
     while (PC < end) {
         const uint16_t *ptr = (uint16_t *) PC;
         const uint8_t prefix = *ptr & 0x3;
@@ -777,21 +876,21 @@ evm_interpreter(uint8_t *prog_start, uint8_t *end,
             if (MODE)
                 evm_print("%4x (x%02x.%x) | ", PC - prog_start, opcode, 3);
             switch (opcode) {
-                case 0x00: PC = lx(PC, X, inst, MODE); break;
-                case 0x04: PC = alu(PC, X, inst, MODE); break;
-                case 0x05: PC = auipc(PC, X, inst, MODE); break;
-                case 0x08: PC = sw(PC, X, inst, MODE); break;
-                case 0x0c: PC = sx(PC, X, inst, MODE); break;
-                case 0x0d: PC = lui(PC, X, inst, MODE); break;
-                case 0x18: PC = bxx(PC, X, inst, MODE); break;
-                case 0x19: PC = jalr(PC, X, inst, MODE); break;
-                case 0x1b: PC = jal(PC, X, inst, MODE); break;
-                case 0x1c: PC = ecall(PC, X, inst, MODE); break;
+                case 0x00: lx(&ctx, ctx.X, inst, MODE); PC += 4; break;
+                case 0x04: alu(ctx.X, inst, MODE);      PC += 4; break;
+                case 0x05: PC = auipc(&ctx, PC, inst, MODE); break;
+                case 0x08: sw(&ctx, ctx.X, inst, MODE); PC += 4; break;
+                case 0x0c: sx(ctx.X, inst, MODE); PC += 4; break;
+                case 0x0d: PC = lui(PC, ctx.X, inst, MODE); break;
+                case 0x18: PC = bxx(&ctx, PC, inst, MODE); break;
+                case 0x19: PC = jalr(&ctx, PC, inst, MODE); break;
+                case 0x1b: PC = jal(&ctx, PC, inst, MODE); break;
+                case 0x1c: ecall(&ctx, inst, MODE); PC += 4; break;
                 default:
                     if (MODE)
                         evm_print("opcode 0x%02x - not implemented\n",
                             opcode);
-                    return -1;
+                    return EVM_MISSING_OPCODE;
             }
         } else {
             const uint16_t inst = *ptr;
@@ -800,16 +899,18 @@ evm_interpreter(uint8_t *prog_start, uint8_t *end,
                 evm_print("%4x (x%02x.%x) | ", PC - prog_start, opcode,
                     prefix);
             switch (prefix) {
-                case 0: PC = c0(PC, X, *ptr, MODE); break;
-                case 1: PC = c1(PC, X, *ptr, MODE); break;
-                case 2: PC = c2(PC, X, *ptr, MODE); break;
+                case 0: c0(&ctx, ctx.X, *ptr, MODE); PC += 2; break;
+                case 1: PC = c1(&ctx, PC, ctx.X, *ptr, MODE); break;
+                case 2: PC = c2(&ctx, PC, ctx.X, *ptr, MODE); break;
             }
         }
+        if (ctx.fault)
+            return EMV_MEMORY_FAULT;
     }
-    args->a0 = X[10];
-    args->a1 = X[11];
-    args->a2 = X[12];
-    args->a3 = X[13];
-    args->a4 = X[14];
+    args->a0 = ctx.X[10];
+    args->a1 = ctx.X[11];
+    args->a2 = ctx.X[12];
+    args->a3 = ctx.X[13];
+    args->a4 = ctx.X[14];
     return 0;
 }

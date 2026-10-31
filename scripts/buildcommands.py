@@ -681,13 +681,22 @@ class HandleFirmwareCalls:
                 arg_parts = arg.split(' ')
                 is_pointer = " *" if "*" in arg else ""
                 type_def = " ".join(arg_parts[:-1])
-                handler += '        %s = (%s%s) regs[%d];\n' % (
-                    arg, type_def, is_pointer, i)
+                if is_pointer:
+                    handler += ('        '
+                                '%s = (%s%s) evm_g2h(ctx, regs[%d], 1);\n' % (
+                        arg, type_def, is_pointer, i))
+                else:
+                    handler += '        %s = (%s) regs[%d];\n' % (
+                        arg, type_def, i)
                 arg_names.append(arg_parts[-1].strip("*"))
             if ret_type != 'void':
-                handler += '        %s ret = %s(%s);\n' % (
-                    ret_type, fn_name, ", ".join(arg_names))
-                handler += '        regs[0] = (uint32_t) ret;\n'
+                if "*" in ret_type:
+                    handler += '        regs[0] = evm_h2g(&ctx->win, %s(%s));\n' % (
+                        fn_name, ", ".join(arg_names))
+                else:
+                    handler += '        %s ret = %s(%s);\n' % (
+                        ret_type, fn_name, ", ".join(arg_names))
+                    handler += '        regs[0] = (uint32_t) ret;\n'
             else:
                 handler += '        %s(%s);\n' % (
                     fn_name, ", ".join(arg_names))
@@ -696,7 +705,7 @@ class HandleFirmwareCalls:
         fmt = """
 %s
 inline void
-platform_ecall(const uint16_t id, uint32_t *regs)
+platform_ecall(struct evm_ctx *ctx, uint16_t id, uint32_t *regs)
 {
     %s
 }
