@@ -12,7 +12,7 @@ static struct {
     uint32_t min_value;           // Min allowed ADC value
     uint32_t max_value;           // Max allowed ADC value
     uint8_t max_invalid, invalid_count;
-    struct spidev_s *dev;
+    uint8_t spi_dev_oid;
 } s;
 
 
@@ -27,7 +27,7 @@ void command(uint8_t oid, uint8_t data_len, uint8_t *data)
     s.max_invalid = ptr[2];
     data = &data[4];
     uint8_t spi_oid = data[0];
-    s.dev = spidev_oid_lookup(spi_oid);
+    s.spi_dev_oid = spi_oid;
 }
 
 __section(".task")
@@ -36,14 +36,14 @@ void task(uint8_t oid, struct evm *vm)
     update_evm_flags(oid, 0, EVM_PENDING);
     if (CHIP_TYPE == 0) {
         uint8_t msg[4] = { MAX31865_RTDMSB_REG, 0x00, 0x00, 0x00 };
-        spidev_transfer(s.dev, 1, 3, msg);
+        spidev_oid_transfer(s.spi_dev_oid, 1, 3, msg);
         // be32 to le32
         uint32_t value = msg[1] << 8 | msg[2];
         value &= 0xffff;
         // Read faults
         msg[0] = MAX31865_FAULTSTAT_REG;
         msg[1] = 0x00;
-        spidev_transfer(s.dev, 1, 2, msg);
+        spidev_oid_transfer(s.spi_dev_oid, 1, 2, msg);
         uint8_t fault = (msg[1] & ~0x03) | (value & 0x0001);
         /* check the result and stop if below or above allowed range */
         if (fault || value < s.min_value || value > s.max_value) {

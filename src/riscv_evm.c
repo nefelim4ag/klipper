@@ -106,15 +106,20 @@ command_evm_send(uint32_t *args)
     struct evm *bc = oid_lookup(oid, command_config_evm);
     uint32_t data_len = args[1];
     uint8_t *data = command_decode_ptr(args[2]);
-    struct evm_args vm_args = {
-        .a0 = oid,
-        .a1 = data_len,
-        .a2 = (uint32_t) data,
-    };
     uint8_t *end = bc->byte_code + bc->data_size;
-    uint8_t *entry = bc->byte_code;
-    evm_interpreter(entry, end,
-        EVM_MODE_INT_DEBUG, &vm_args);
+
+    struct evm_ctx ctx;
+    evm_setup_prog(&ctx, bc->byte_code, end);
+    evm_map_memory(&ctx, data, data_len);
+
+    ctx.X[10] = oid;
+    ctx.X[11] = data_len;
+    ctx.X[12] = evm_h2g(&ctx, data);
+
+    uint16_t entry_offset = bc->byte_code - bc->byte_code;
+    int ret = evm_interpreter(&ctx, entry_offset, EVM_MODE_INT);
+    if (ret == EMV_MEMORY_FAULT)
+        shutdown("EVM memory fault");
 }
 DECL_COMMAND(command_evm_send, "evm_send oid=%c data=%*s");
 
@@ -174,14 +179,14 @@ DECL_COMMAND(command_evm_query, "evm_query oid=%c rest_ticks=%u");
 void
 evm_query(struct evm *vm, uint8_t oid)
 {
-    struct evm_args vm_args = {
-        .a0 = oid,
-        .a1 = (uint32_t) vm,
-    };
-    uint8_t *entry = vm->byte_code + vm->task_offset;
     uint8_t *end = vm->byte_code + vm->data_size;
-    evm_interpreter(entry, end,
-        EVM_MODE_INT, &vm_args);
+    struct evm_ctx ctx;
+    evm_setup_prog(&ctx, vm->byte_code, end);
+    ctx.X[10] = oid;
+    uint16_t offset = vm->task_offset;
+    int ret = evm_interpreter(&ctx, offset, EVM_MODE_INT);
+    if (ret == EMV_MEMORY_FAULT)
+        shutdown("EVM memory fault");
 }
 
 void
