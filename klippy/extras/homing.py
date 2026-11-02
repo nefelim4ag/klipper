@@ -250,8 +250,10 @@ class Homing:
             self.toolhead.set_position(homepos)
     def _create_probe_gcmd(self, attempt_num, probe_speed):
         gcode = self.printer.lookup_object('gcode')
-        params = {'HOME_ATTEMPT_NUM': str(attempt_num), 'SAMPLES': '1',
+        params = {'HOME_ATTEMPT_NUM': str(attempt_num),
                   'PROBE_SPEED': str(probe_speed)}
+        if attempt_num == 1:
+            params['SAMPLES'] = "1"
         return gcode.create_gcode_command("G28", "", params)
     def _probing_home(self, probe_session, attempt_num, probe_speed):
         # Run probe
