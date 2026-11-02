@@ -545,6 +545,9 @@ def probe_results_from_avg(measures, toolhead_pos, calibration, offsets):
     freq_avg = freq_sum / len(measures)
     # Determine height associated with frequency
     sensor_z = calibration.freq_to_height(freq_avg)
+    z_sum = sum(m[2] for m in measures)
+    z_avg = z_sum / len(measures)
+    logging.info("%.6f %.6f" % (sensor_z, z_avg))
     if sensor_z <= -OUT_OF_RANGE or sensor_z >= OUT_OF_RANGE:
         raise cmderr("probe_eddy_current sensor not in valid range")
     return manual_probe.create_probe_result(toolhead_pos,
