@@ -4,6 +4,9 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import logging, ast
+
+from klippy import Printer
+from mcu import MCU
 from .display import display
 
 
@@ -30,6 +33,10 @@ class GCodeRequestQueue:
         rqueue = self.rqueue
         while rqueue:
             next_time = max(rqueue[0][0], self.next_min_flush_time)
+            now = self.printer.get_reactor().monotonic()
+            logging.info("Ept now %.3f, Next time %.3f, flush_time %.3f" % (
+                self.mcu.estimated_print_time(now), next_time,
+                must_flush_time))
             if next_time > must_flush_time:
                 return
             # Skip requests that have been overridden with a following request
