@@ -27,7 +27,7 @@ def measures_stats(measures):
     mad_hz = median(mads)
     return freq_avg, mad_hz, count
 
-def _lookup_toolhead_pos(toolhead, pos_time):
+def lookup_toolhead_pos(toolhead, pos_time):
     kin = toolhead.get_kinematics()
     kin_spos = {s.get_name(): s.mcu_to_commanded_position(
         s.get_past_mcu_position(pos_time))
@@ -198,7 +198,7 @@ class EddyCalibrationTool:
             gcode.respond_info(
                 "Frequency stops decreasing at step %.3f" % (z))
         toolhead = self.printer.lookup_object('toolhead')
-        kin_pos = _lookup_toolhead_pos(toolhead, start_query_time)
+        kin_pos = lookup_toolhead_pos(toolhead, start_query_time)
         # Fix Z position offset
         z = kin_pos[2] - self._probe_calibrate_z
         # Calculate if samples have a significant difference
@@ -1088,8 +1088,8 @@ class PrinterEddyProbe:
         pos = probe_session.pull_probed_results()[0]
         probe_session.end_probe_session()
         return pos
-    def add_client(self, cb):
-        self.sensor_helper.add_client(cb)
+    def get_gather_samples(self):
+        return EddyGatherSamples(self.printer, self.sensor_helper)
     def get_probe_params(self, gcmd=None):
         return self.param_helper.get_probe_params(gcmd)
     def get_offsets(self, gcmd=None):
