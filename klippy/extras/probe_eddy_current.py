@@ -34,6 +34,30 @@ def _lookup_toolhead_pos(toolhead, pos_time):
         for s in kin.get_steppers()}
     return kin.calc_position(kin_spos)
 
+def do_calibration_moves(toolhead, move_speed, collect_cb, stop_cb,
+                         range_z=4.0, samp_dist=0.04):
+    move = toolhead.manual_move
+    # Move to each 40um position
+    req_zpos = [i*samp_dist for i in range(int(range_z / samp_dist) + 1)]
+    start_pos = toolhead.get_position()
+    for zpos in req_zpos:
+        # Move to next position (always descending to reduce backlash)
+        hop_pos = list(start_pos)
+        hop_pos[2] += zpos + samp_dist + 0.500
+        move(hop_pos, move_speed)
+        next_pos = list(start_pos)
+        next_pos[2] += zpos
+        move(next_pos, move_speed)
+        # Note sample timing
+        start_query_time = toolhead.get_last_move_time() + 0.050
+        end_query_time = start_query_time + 0.100
+        toolhead.dwell(0.200)
+        collect_cb(start_query_time, end_query_time, start_query_time)
+        if stop_cb():
+            break
+    toolhead.wait_moves()
+
+
 ######################################################################
 # Calibration
 ######################################################################
@@ -195,37 +219,6 @@ class EddyCalibrationTool:
         self._last_pos_sample = z, (freq_avg, mad_hz, count)
         return self._last_pos_sample
     # PROBE_EDDY_CURRENT_CALIBRATE
-    def do_calibration_moves(self, move_speed, gather):
-        toolhead = self.printer.lookup_object('toolhead')
-        move = toolhead.manual_move
-        # Start data collection
-        toolhead.dwell(1.)
-        self.calibration.note_z_calibration_start()
-        # Move to each 40um position
-        max_z = 4.0
-        samp_dist = 0.040
-        req_zpos = [i*samp_dist for i in range(int(max_z / samp_dist) + 1)]
-        start_pos = toolhead.get_position()
-        self._produce_moves = True
-        for zpos in req_zpos:
-            # Move to next position (always descending to reduce backlash)
-            hop_pos = list(start_pos)
-            hop_pos[2] += zpos + 0.500
-            move(hop_pos, move_speed)
-            next_pos = list(start_pos)
-            next_pos[2] += zpos
-            move(next_pos, move_speed)
-            # Note sample timing
-            start_query_time = toolhead.get_last_move_time() + 0.050
-            end_query_time = start_query_time + 0.100
-            toolhead.dwell(0.200)
-            gather.add_probe_request(self.calc_freqs, start_query_time,
-                                     end_query_time, start_query_time)
-            if not self._produce_moves:
-                break
-        toolhead.dwell(1.0)
-        toolhead.wait_moves()
-        self.calibration.note_z_calibration_finish()
     def validate_calibration_data(self, positions):
         if not positions:
             return []
@@ -290,13 +283,23 @@ class EddyCalibrationTool:
         self._last_pos_sample = -999, (40000000, .0, .0)
         self._discard_after_z = 999.
         positions = []
+        probe_speed = self.probe_speed
+        self._produce_moves = True
+        toolhead = self.printer.lookup_object('toolhead')
+        toolhead.dwell(1.)
         with EddyGatherSamples(self.printer, self.sensor_helper) as gather:
+            self.calibration.note_z_calibration_start()
+            def collect_cb(start_query_time, end_query_time, print_time):
+                gather.add_probe_request(self.calc_freqs, start_query_time,
+                                         end_query_time, print_time)
+            def must_stop():
+                return not self._produce_moves
             # Perform calibration movement and capture
-            self.do_calibration_moves(self.probe_speed, gather)
-            _positions = gather.pull_probed()
-            for p, v in _positions:
-                if p < self._discard_after_z:
-                    positions.append((p, v))
+            do_calibration_moves(toolhead, probe_speed, collect_cb, must_stop)
+            self.calibration.note_z_calibration_finish()
+            positions = gather.pull_probed()
+        while positions and positions[-1][0] >= self._discard_after_z:
+            positions.pop()
         filtered = self.validate_calibration_data(positions)
         if len(filtered) <= 8:
            raise self.printer.command_error(
