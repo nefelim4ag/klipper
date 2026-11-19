@@ -5780,21 +5780,27 @@ the <a href="G-Codes.html#input_shaper">command reference</a>.</p>
 stepper with a TMC driver, named after the stepper. Also see the
 <a href="G-Codes.html#stepper_ripple_compensation">command reference</a>.</p>
 <div class="highlight"><pre><span></span><code>[stepper_ripple_compensation stepper_x]
-#h1_nodes:
-#h2_nodes:
-#h3_nodes:
-#h4_nodes:
-#   The correction of the given harmonic of the electrical frequency
-#   as a function of the stepper speed and direction. Each line is a
-#   node &quot;speed, amplitude, phase, amplitude, phase&quot; with the speed
-#   in mm/s and the correction in microns and degrees for the positive
-#   and then the negative direction of motion of the stepper. The
-#   correction is interpolated linearly between the nodes. Max 16
-#   nodes. A single node is a correction that does not depend on the
-#   speed. The default is no correction. For example:
-#     80, 2.173, 67.8, 2.173, 100.0
-#     96, 2.189, 68.5, 2.258, 100.9
-#     124, 2.246, 66.1, 2.195, 107.5
+#h1:
+#h2:
+#h3:
+#h4:
+#   The correction of the given harmonic of the electrical frequency.
+#   The first line is the positive and the second line the negative
+#   direction of motion of the stepper, a single line is used for both.
+#   Each line is &quot;amplitude, phase&quot; of the correction at low speed in
+#   microns and degrees, optionally followed by &quot;amplitude, phase&quot; at
+#   high speed. The speed_model gives the transition between the two,
+#   without it the low speed correction is used at all speeds. The
+#   default is no correction. For example:
+#     2.173, 67.8, 0.512, 40.3
+#     2.258, 100.9
+#speed_model:
+#   The transition between the low and the high speed correction as
+#   &quot;f0, q, delay&quot;, fitted by the calibration. The default is none.
+#max_speed:
+#   The stepper speed in mm/s above which the correction fades out, it
+#   is zero at 10% above it. The calibration sets it to its MAX_SPEED.
+#   The default is no fade.
 #max_step_error: 0.0000025
 #   Dev. Do not edit.
 </code></pre></div>
